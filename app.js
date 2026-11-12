@@ -8,6 +8,18 @@ const items = [
 ];
 let activeFilter="all";
 let activeView="home";
+const savedKey="raif-web-saved-items";
+function readSaved(){
+ try{
+  const value=JSON.parse(localStorage.getItem(savedKey)||"[]");
+  return Array.isArray(value)?value.filter(Number.isInteger):[];
+ }catch{return [];}
+}
+let savedIds=readSaved();
+function saveSaved(){
+ try{localStorage.setItem(savedKey,JSON.stringify(savedIds));return true;}
+ catch{return false;}
+}
 const catalog=document.querySelector("#catalog");
 const search=document.querySelector("#search");
 const empty=document.querySelector("#empty");
@@ -15,12 +27,14 @@ const typeNames={movie:"فيلم",series:"مسلسل",anime:"أنمي"};
 function render(){
  const q=search.value.trim().toLocaleLowerCase("ar");
  const filtered=items.filter(item=>(activeFilter==="all"||item.type===activeFilter)&&
+  (activeView!=="library"||savedIds.includes(item.id))&&
   (item.title.toLocaleLowerCase("ar").includes(q)||item.genre.toLocaleLowerCase("ar").includes(q)));
  catalog.innerHTML=filtered.map(item=>`
   <article class="media-card" tabindex="0" role="button" data-id="${item.id}" aria-label="تفاصيل ${item.title}">
    <div class="poster" style="--c1:${item.c1};--c2:${item.c2}"><span class="poster-art">${item.symbol}</span><span class="poster-label">${typeNames[item.type]} · ${item.year}</span></div>
    <div class="media-title">${item.title}</div><div class="media-meta">${item.genre} · ${typeNames[item.type]}</div>
   </article>`).join("");
+ empty.textContent=activeView==="library"?"مكتبتك فارغة حالياً. أضف عناوين من نافذة التفاصيل.":"لا توجد نتائج مطابقة. جرّب كلمة بحث أخرى.";
  empty.hidden=filtered.length>0;
  catalog.querySelectorAll(".media-card").forEach(card=>{
   card.addEventListener("click",()=>openDetail(Number(card.dataset.id)));
@@ -29,7 +43,15 @@ function render(){
 }
 function openDetail(id){
  const item=items.find(x=>x.id===id);if(!item)return;
- document.querySelector("#detail-content").innerHTML=`<span class="eyebrow">${typeNames[item.type]} · ${item.year}</span><h2>${item.title}</h2><p>${item.description}</p><div class="detail-note">حالة الربط: لا توجد مصادر بث متصلة حالياً. هذه نسخة واجهة أولية.</div>`;
+ const isSaved=savedIds.includes(item.id);
+ document.querySelector("#detail-content").innerHTML=`<span class="eyebrow">${typeNames[item.type]} · ${item.year}</span><h2>${item.title}</h2><p>${item.description}</p><button class="save-btn" id="toggle-save" type="button">${isSaved?"إزالة من مكتبتي":"＋ أضف إلى مكتبتي"}</button><div class="detail-note">حالة الربط: لا توجد مصادر بث متصلة حالياً. هذه نسخة واجهة أولية.</div>`;
+ document.querySelector("#toggle-save").addEventListener("click",()=>{
+  savedIds=isSaved?savedIds.filter(savedId=>savedId!==item.id):[...savedIds,item.id];
+  const persisted=saveSaved();
+  document.querySelector("#toggle-save").textContent=savedIds.includes(item.id)?"إزالة من مكتبتي":"＋ أضف إلى مكتبتي";
+  if(!persisted) document.querySelector("#detail-content .detail-note").textContent="تعذر حفظ التغيير على هذا المتصفح.";
+  if(activeView==="library")render();
+ });
  document.querySelector("#detail-dialog").showModal();
 }
 document.querySelectorAll(".filter").forEach(button=>button.addEventListener("click",()=>{
