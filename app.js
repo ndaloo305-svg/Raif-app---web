@@ -46,7 +46,7 @@ function openDetail(id){
  const isSaved=savedIds.includes(item.id);
  document.querySelector("#detail-content").innerHTML=`<span class="eyebrow">${typeNames[item.type]} · ${item.year}</span><h2>${item.title}</h2><p>${item.description}</p><button class="save-btn" id="toggle-save" type="button">${isSaved?"إزالة من مكتبتي":"＋ أضف إلى مكتبتي"}</button><div class="detail-note">حالة الربط: لا توجد مصادر بث متصلة حالياً. هذه نسخة واجهة أولية.</div>`;
  document.querySelector("#toggle-save").addEventListener("click",()=>{
-  savedIds=isSaved?savedIds.filter(savedId=>savedId!==item.id):[...savedIds,item.id];
+  savedIds=savedIds.includes(item.id)?savedIds.filter(savedId=>savedId!==item.id):[...savedIds,item.id];
   const persisted=saveSaved();
   document.querySelector("#toggle-save").textContent=savedIds.includes(item.id)?"إزالة من مكتبتي":"＋ أضف إلى مكتبتي";
   if(!persisted) document.querySelector("#detail-content .detail-note").textContent="تعذر حفظ التغيير على هذا المتصفح.";
