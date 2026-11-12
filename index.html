@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101114">
+  <meta name="description" content="RAIF — مكتبتك الترفيهية في مكان واحد">
+  <title>RAIF — مكتبتك</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="التنقل الرئيسي">
+      <a class="brand" href="#" aria-label="RAIF الرئيسية"><span class="brand-mark">R</span><span>RAIF</span></a>
+      <nav class="side-nav">
+        <button class="nav-item active" data-view="home"><span>⌂</span> الرئيسية</button>
+        <button class="nav-item" data-view="movies"><span>▣</span> الأفلام</button>
+        <button class="nav-item" data-view="series"><span>▤</span> المسلسلات</button>
+        <button class="nav-item" data-view="anime"><span>✦</span> الأنمي</button>
+        <button class="nav-item" data-view="library"><span>▧</span> مكتبتي</button>
+      </nav>
+      <div class="sidebar-bottom"><span class="status-dot"></span> واجهة تجريبية — مصادر البث غير مربوطة</div>
+    </aside>
+    <main class="main-content">
+      <header class="topbar">
+        <div class="mobile-brand"><span class="brand-mark">R</span> RAIF</div>
+        <label class="search-box"><span>⌕</span><input id="search" type="search" placeholder="ابحث عن فيلم أو مسلسل..." autocomplete="off"></label>
+        <button class="avatar" aria-label="الحساب">N</button>
+      </header>
+      <section class="hero" id="hero">
+        <div class="hero-copy">
+          <span class="eyebrow">اكتشف عالمك</span>
+          <h1>كل ما تحب،<br><em>في مكان واحد.</em></h1>
+          <p>تجربة مشاهدة موحّدة لاكتشاف مكتبتك ومصادرك المفضلة.</p>
+          <button class="primary-btn" id="explore">استكشف المكتبة <span>←</span></button>
+        </div>
+        <div class="hero-art" aria-hidden="true"><div class="orb orb-one"></div><div class="orb orb-two"></div><div class="art-letter">R</div></div>
+      </section>
+      <section class="content-section">
+        <div class="section-heading"><div><span class="eyebrow">مختارة لك</span><h2 id="section-title">اكتشف المحتوى</h2></div><div class="filters" id="filters"><button class="filter active" data-filter="all">الكل</button><button class="filter" data-filter="movie">أفلام</button><button class="filter" data-filter="series">مسلسلات</button><button class="filter" data-filter="anime">أنمي</button></div></div>
+        <div class="catalog-grid" id="catalog" aria-live="polite"></div>
+        <p class="empty-state" id="empty" hidden>لا توجد نتائج مطابقة. جرّب كلمة بحث أخرى.</p>
+      </section>
+      <footer><span>RAIF</span><span>واجهة أولية قيد التطوير</span></footer>
+    </main>
+  </div>
+  <dialog id="detail-dialog" class="detail-dialog"><button class="dialog-close" id="close-dialog" aria-label="إغلاق">×</button><div id="detail-content"></div></dialog>
+</body>
+</html>
