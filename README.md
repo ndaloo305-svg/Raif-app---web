@@ -39,3 +39,13 @@ python3 -m http.server 8000
 - النشر الحي يحتاج تفعيل GitHub Pages ودمج طلب السحب بعد المراجعة.
 
 هذا المستودع منفصل عن تطبيق RAIF iOS، ويستخدم مشروع Supabase الحالي دون إنشاء مشروع جديد.
+
+
+## Stremio catalog browsing
+
+The source manager can now read an enabled add-on's HTTPS Manifest and list the catalogs declared by that add-on. Selecting a catalog requests its first page and renders the returned metadata cards in the browser.
+
+- Catalog requests are made directly from the browser; the add-on server must allow cross-origin requests (CORS).
+- Only HTTPS Manifest and poster URLs are accepted.
+- Responses are limited to 1.5 MB and requests time out after 12 seconds.
+- This is catalog browsing only. Stream resolution, playback, and add-on catalogs that require custom extra parameters are not implemented yet.
