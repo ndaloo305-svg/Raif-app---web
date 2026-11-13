@@ -186,7 +186,7 @@ function validContentId(value: unknown): string {
   return value.trim();
 }
 
-async function getOwnedAddon(client: ReturnType<typeof createClient>, userId: string, addonId: unknown) {
+async function getOwnedAddon(client: any, userId: string, addonId: unknown) {
   if (typeof addonId !== "string" || !/^[0-9a-f-]{36}$/i.test(addonId)) {
     throw new Error("Invalid addon ID.");
   }
