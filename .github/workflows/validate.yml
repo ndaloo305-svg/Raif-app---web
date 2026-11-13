@@ -22,3 +22,5 @@ jobs:
           test -s app.js
       - name: Check JavaScript syntax
         run: node --check app.js
+      - name: Check UI bindings and browser-key safety
+        run: npm run validate
