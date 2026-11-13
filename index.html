@@ -55,6 +55,10 @@
           <label for="source-url">رابط Manifest</label>
           <input id="source-url" type="url" inputmode="url" placeholder="https://example.com/manifest.json" required>
           <button class="primary-btn" id="source-submit" type="submit">＋ حفظ المصدر</button>
+          <label for="source-import-file">استيراد إضافاتك من ملف Stremio JSON</label>
+          <input id="source-import-file" type="file" accept=".json,application/json">
+          <button class="save-btn" id="source-import-button" type="button">استيراد المصادر المتوافقة</button>
+          <p class="auth-status" id="source-import-status" role="status"></p>
         </form>
         <p class="auth-status" id="source-status" role="status"></p>
         <div id="source-list" class="source-list" aria-live="polite"></div>
