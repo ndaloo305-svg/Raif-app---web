@@ -653,6 +653,7 @@ async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}) {
 }
 
 async function openAddonMeta(addon, catalogEntry, catalogMeta) {
+  setSelectedSubtitle(null);
   const dialog = document.querySelector("#detail-dialog");
   const content = document.querySelector("#detail-content");
   content.replaceChildren();
@@ -707,9 +708,9 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
         const streamData = await fetchAddonJson(streamUrl.href, "مصادر التشغيل");
         const rawStreams = Array.isArray(streamData?.streams) ? streamData.streams : [];
         const streams = rawStreams.filter(stream => {
-          if (stream?.infoHash || stream?.externalUrl || stream?.ytId) return false;
+          if (stream?.infoHash || stream?.externalUrl || stream?.ytId || stream?.behaviorHints?.notWebReady) return false;
           if (typeof stream?.url !== "string") return false;
-          try { const url = new URL(stream.url); return ["https:", "http:"].includes(url.protocol) && !url.username && !url.password; }
+          try { const url = new URL(stream.url); return url.protocol === "https:" && !url.username && !url.password && !/\\.torrent$/i.test(url.pathname); }
           catch { return false; }
         });
         if (!streams.length) {
