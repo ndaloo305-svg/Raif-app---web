@@ -411,6 +411,104 @@ async function inspectAddon(addon) {
   }
 }
 
+async function openAddonMeta(addon, catalogEntry, catalogMeta) {
+  const dialog = document.querySelector("#detail-dialog");
+  const content = document.querySelector("#detail-content");
+  content.replaceChildren();
+  const heading = document.createElement("h2");
+  heading.textContent = catalogMeta.name || catalogMeta.id || "تفاصيل العنوان";
+  const summary = document.createElement("p");
+  summary.textContent = "جارٍ تحميل تفاصيل العنوان...";
+  content.append(heading, summary);
+  dialog.showModal();
+
+  try {
+    const url = addonEndpoint(addon.manifest_url, ["meta", catalogEntry.type, catalogMeta.id]);
+    const result = await fetchAddonJson(url.href, "تفاصيل العنوان");
+    const meta = result?.meta || catalogMeta;
+    summary.textContent = meta.description || "لا توجد تفاصيل إضافية لهذا العنوان.";
+    const facts = document.createElement("p");
+    facts.textContent = [meta.year, meta.runtime, ...(Array.isArray(meta.genres) ? meta.genres : [])]
+      .filter(Boolean).join(" · ");
+    content.append(facts);
+
+    if (typeof meta.poster === "string" && safeHttpsUrl(meta.poster)) {
+      const poster = document.createElement("img");
+      poster.src = meta.poster;
+      poster.alt = "";
+      poster.loading = "lazy";
+      poster.referrerPolicy = "no-referrer";
+      poster.className = "addon-detail-poster";
+      content.prepend(poster);
+    }
+
+    const streamsButton = document.createElement("button");
+    streamsButton.type = "button";
+    streamsButton.className = "primary-btn";
+    streamsButton.textContent = "عرض مصادر التشغيل";
+    const streamsArea = document.createElement("div");
+    streamsArea.className = "addon-stream-list";
+    streamsButton.addEventListener("click", async () => {
+      streamsButton.disabled = true;
+      streamsButton.textContent = "جارٍ البحث عن المصادر...";
+      streamsArea.replaceChildren();
+      try {
+        const streamUrl = addonEndpoint(addon.manifest_url, ["stream", catalogEntry.type, meta.id]);
+        const streamData = await fetchAddonJson(streamUrl.href, "مصادر التشغيل");
+        const streams = Array.isArray(streamData?.streams) ? streamData.streams : [];
+        if (!streams.length) {
+          const note = document.createElement("p");
+          note.textContent = "لم يُرجع هذا المصدر خيارات تشغيل لهذا العنوان.";
+          streamsArea.append(note);
+        }
+        streams.forEach((stream, index) => {
+          const row = document.createElement("article");
+          row.className = "addon-stream-row";
+          const name = document.createElement("strong");
+          name.textContent = stream.name || stream.title || ("مصدر " + (index + 1));
+          const description = document.createElement("p");
+          description.textContent = stream.description || stream.behaviorHints?.filename || "";
+          row.append(name, description);
+          if (typeof stream.url === "string") {
+            let target;
+            try { target = new URL(stream.url); } catch { target = null; }
+            if (target && ["https:", "http:"].includes(target.protocol) && !target.username && !target.password) {
+              const link = document.createElement("a");
+              link.href = target.href;
+              link.target = "_blank";
+              link.rel = "noopener noreferrer";
+              link.textContent = "فتح رابط المصدر";
+              row.append(link);
+              if (target.protocol === "http:" && location.protocol === "https:") {
+                const warning = document.createElement("small");
+                warning.textContent = "قد يمنع المتصفح فتح HTTP من صفحة HTTPS.";
+                row.append(warning);
+              }
+            }
+          } else if (stream.infoHash) {
+            const note = document.createElement("small");
+            note.textContent = "مصدر Torrent: يلزم محرك تشغيل منفصل، ولم يتم ربطه بعد.";
+            row.append(note);
+          }
+          streamsArea.append(row);
+        });
+      } catch (error) {
+        const note = document.createElement("p");
+        note.className = "auth-status is-error";
+        note.textContent = "تعذر جلب المصادر: " + error.message;
+        streamsArea.append(note);
+      } finally {
+        streamsButton.disabled = false;
+        streamsButton.textContent = "تحديث مصادر التشغيل";
+      }
+    });
+    content.append(streamsButton, streamsArea);
+  } catch (error) {
+    summary.textContent = "تعذر تحميل التفاصيل: " + error.message;
+    summary.classList.add("is-error");
+  }
+}
+
 function configureAddonCatalog(addon, entry, activeButton) {
   addonCatalogResults.querySelector(".addon-extra-form")?.remove();
   const specs = Array.isArray(entry.extra) ? entry.extra : [];
@@ -521,6 +619,16 @@ async function loadAddonCatalog(addon, entry, activeButton, extra = {}) {
       const details = [meta.year, meta.type, meta.releaseInfo].filter(Boolean);
       detail.textContent = details.join(" · ");
       card.append(title, detail);
+      card.tabIndex = 0;
+      card.setAttribute("role", "button");
+      card.setAttribute("aria-label", "تفاصيل " + (meta.name || meta.id || "العنوان"));
+      card.addEventListener("click", () => openAddonMeta(addon, entry, meta));
+      card.addEventListener("keydown", event => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openAddonMeta(addon, entry, meta);
+        }
+      });
       results.append(card);
     });
     addonCatalogResults.append(results);
