@@ -520,7 +520,7 @@ async function findSubtitles(meta, catalogEntry, area, button) {
   const subtitles = results.flatMap(result => result.status === "fulfilled" ? result.value : []);
   if (!subtitles.length) {
     const note = document.createElement("p");
-    note.textContent = "لم تُرجع المصادر ترجمات لهذا العنوان، أو تعذر الوصول إليها بسبب CORS.";
+    note.textContent = "لم تُرجع المصادر ترجمات لهذا العنوان، أو تعذر الوصول إلى أحدها.";
     area.append(note);
   } else {
     subtitles.forEach((subtitle, index) => {
@@ -630,8 +630,7 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
   dialog.showModal();
 
   try {
-    const url = addonEndpoint(addon.manifest_url, ["meta", catalogEntry.type, catalogMeta.id]);
-    const result = await fetchAddonResource(addon, "meta", catalogEntry.type, meta.id);
+    const result = await fetchAddonResource(addon, "meta", catalogEntry.type, catalogMeta.id);
     const meta = result?.meta || catalogMeta;
     summary.textContent = meta.description || "لا توجد تفاصيل إضافية لهذا العنوان.";
     const facts = document.createElement("p");
@@ -669,7 +668,6 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
       streamsButton.textContent = "جارٍ البحث عن المصادر...";
       streamsArea.replaceChildren();
       try {
-        const streamUrl = addonEndpoint(addon.manifest_url, ["stream", catalogEntry.type, meta.id]);
         const streamData = await fetchAddonResource(addon, "stream", catalogEntry.type, meta.id);
         const rawStreams = Array.isArray(streamData?.streams) ? streamData.streams : [];
         const streams = rawStreams.filter(stream => {
@@ -839,7 +837,6 @@ async function loadAddonCatalog(addon, entry, activeButton, extra = {}) {
   addonCatalogResults.querySelector(".addon-meta-grid")?.remove();
   addonCatalogResults.append(loading);
   try {
-    const url = addonEndpoint(addon.manifest_url, ["catalog", entry.type, entry.id], {skip: 0, ...extra});
     const data = await fetchAddonResource(addon, "catalog", entry.type, entry.id, {skip:0, ...extra});
     const metas = Array.isArray(data?.metas) ? data.metas : [];
     loading.remove();
