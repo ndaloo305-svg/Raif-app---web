@@ -272,6 +272,12 @@ async function loadSources() {
 
     const actions = document.createElement("div");
     actions.className = "source-actions";
+    const browse = document.createElement("button");
+    browse.className = "save-btn";
+    browse.type = "button";
+    browse.textContent = "عرض الكتالوج";
+    browse.disabled = !addon.enabled;
+    browse.addEventListener("click", () => inspectAddon(addon));
     const toggle = document.createElement("button");
     toggle.className = "save-btn";
     toggle.type = "button";
@@ -282,10 +288,180 @@ async function loadSources() {
     remove.type = "button";
     remove.textContent = "حذف";
     remove.addEventListener("click", () => deleteSource(addon.id));
-    actions.append(toggle, remove);
+    actions.append(browse, toggle, remove);
     card.append(details, actions);
     list.append(card);
   });
+}
+
+const addonCatalogResults = document.createElement("section");
+addonCatalogResults.id = "source-catalog-results";
+addonCatalogResults.className = "addon-catalog-results";
+addonCatalogResults.setAttribute("aria-live", "polite");
+document.querySelector("#source-list").after(addonCatalogResults);
+
+function safeHttpsUrl(value) {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.username || url.password) return null;
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchAddonJson(url, label) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      mode: "cors",
+      credentials: "omit",
+      redirect: "follow",
+      headers: {Accept: "application/json"},
+      signal: controller.signal
+    });
+    if (!response.ok) throw new Error(label + " أعاد HTTP " + response.status);
+    const length = Number(response.headers.get("content-length") || 0);
+    if (length > 1_500_000) throw new Error("حجم استجابة المصدر أكبر من الحد المسموح.");
+    const raw = await response.text();
+    if (raw.length > 1_500_000) throw new Error("حجم استجابة المصدر أكبر من الحد المسموح.");
+    try {
+      return JSON.parse(raw);
+    } catch {
+      throw new Error("استجابة المصدر ليست JSON صالحاً.");
+    }
+  } catch (error) {
+    if (error.name === "AbortError") throw new Error("انتهت مهلة الاتصال بالمصدر.");
+    if (error instanceof TypeError) throw new Error("تعذر الوصول للمصدر. تحقق من الرابط أو دعم CORS في خادم الإضافة.");
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function addonEndpoint(manifestUrl, parts, query = {}) {
+  const manifest = safeHttpsUrl(manifestUrl);
+  if (!manifest) throw new Error("يجب أن يكون رابط Manifest آمناً ويستخدم HTTPS.");
+  const endpoint = new URL(manifest.href);
+  endpoint.search = "";
+  endpoint.hash = "";
+  endpoint.pathname = endpoint.pathname.replace(/\\/g, "/").replace(/manifest\\.json$/i, "");
+  if (!endpoint.pathname.endsWith("/")) endpoint.pathname += "/";
+  endpoint.pathname += parts.map(part => encodeURIComponent(String(part))).join("/") + ".json";
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== undefined && value !== null && value !== "") endpoint.searchParams.set(key, String(value));
+  }
+  return endpoint;
+}
+
+function renderAddonMessage(message, isError = false) {
+  addonCatalogResults.replaceChildren();
+  const note = document.createElement("p");
+  note.className = isError ? "auth-status is-error" : "empty-state";
+  note.textContent = message;
+  addonCatalogResults.append(note);
+}
+
+async function inspectAddon(addon) {
+  if (!addon.enabled) return;
+  renderAddonMessage("جارٍ قراءة Manifest للمصدر...");
+  addonCatalogResults.scrollIntoView({behavior: "smooth", block: "start"});
+  try {
+    const manifestUrl = safeHttpsUrl(addon.manifest_url);
+    if (!manifestUrl) throw new Error("الرابط غير آمن. استخدم رابط HTTPS صحيحاً.");
+    const manifest = await fetchAddonJson(manifestUrl.href, "Manifest");
+    if (!manifest || typeof manifest !== "object" || !manifest.id || !manifest.name ||
+        !Array.isArray(manifest.resources) || !Array.isArray(manifest.catalogs)) {
+      throw new Error("ملف Manifest لا يطابق بنية إضافة Stremio المتوقعة.");
+    }
+    const supportsCatalog = manifest.resources.some(resource =>
+      resource === "catalog" || (resource && typeof resource === "object" && resource.name === "catalog")
+    );
+    if (!supportsCatalog || manifest.catalogs.length === 0) {
+      throw new Error("هذا المصدر لا يعلن عن أي كتالوج قابل للعرض.");
+    }
+
+    addonCatalogResults.replaceChildren();
+    const heading = document.createElement("div");
+    heading.className = "addon-results-heading";
+    const title = document.createElement("h3");
+    title.textContent = manifest.name;
+    const subtitle = document.createElement("p");
+    subtitle.textContent = manifest.description || "اختر كتالوجاً لعرض عناوينه.";
+    heading.append(title, subtitle);
+    addonCatalogResults.append(heading);
+
+    const catalogButtons = document.createElement("div");
+    catalogButtons.className = "addon-catalog-buttons";
+    manifest.catalogs.forEach(entry => {
+      if (!entry || !entry.type || !entry.id) return;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "filter";
+      button.textContent = entry.name || (entry.type + " · " + entry.id);
+      button.addEventListener("click", () => loadAddonCatalog(addon, entry, button));
+      catalogButtons.append(button);
+    });
+    addonCatalogResults.append(catalogButtons);
+    if (!catalogButtons.childElementCount) throw new Error("لم يعثر Manifest على كتالوجات صالحة.");
+  } catch (error) {
+    renderAddonMessage("تعذر قراءة المصدر: " + error.message, true);
+  }
+}
+
+async function loadAddonCatalog(addon, entry, activeButton) {
+  addonCatalogResults.querySelectorAll(".addon-catalog-buttons button")
+    .forEach(button => button.classList.toggle("active", button === activeButton));
+  const results = document.createElement("div");
+  results.className = "addon-meta-grid";
+  const loading = document.createElement("p");
+  loading.className = "empty-state";
+  loading.textContent = "جارٍ تحميل العناوين...";
+  addonCatalogResults.querySelector(".addon-meta-grid")?.remove();
+  addonCatalogResults.append(loading);
+  try {
+    const url = addonEndpoint(addon.manifest_url, ["catalog", entry.type, entry.id], {skip: 0});
+    const data = await fetchAddonJson(url.href, "الكتالوج");
+    const metas = Array.isArray(data?.metas) ? data.metas : [];
+    loading.remove();
+    if (!metas.length) {
+      const note = document.createElement("p");
+      note.className = "empty-state";
+      note.textContent = "هذا الكتالوج لا يحتوي على عناوين حالياً.";
+      addonCatalogResults.append(note);
+      return;
+    }
+    metas.forEach(meta => {
+      const card = document.createElement("article");
+      card.className = "addon-meta-card";
+      if (typeof meta.poster === "string" && safeHttpsUrl(meta.poster)) {
+        const poster = document.createElement("img");
+        poster.src = meta.poster;
+        poster.alt = "";
+        poster.loading = "lazy";
+        poster.referrerPolicy = "no-referrer";
+        card.append(poster);
+      } else {
+        const placeholder = document.createElement("div");
+        placeholder.className = "addon-meta-poster";
+        placeholder.textContent = "RAIF";
+        card.append(placeholder);
+      }
+      const title = document.createElement("strong");
+      title.textContent = meta.name || meta.id || "عنوان بدون اسم";
+      const detail = document.createElement("span");
+      const details = [meta.year, meta.type, meta.releaseInfo].filter(Boolean);
+      detail.textContent = details.join(" · ");
+      card.append(title, detail);
+      results.append(card);
+    });
+    addonCatalogResults.append(results);
+  } catch (error) {
+    loading.textContent = "تعذر تحميل الكتالوج: " + error.message;
+    loading.classList.add("is-error");
+  }
 }
 
 async function updateSource(id, changes) {
@@ -322,9 +498,9 @@ document.querySelector("#source-form").addEventListener("submit", async event =>
   let manifest;
   try {
     manifest = new URL(urlInput.value.trim());
-    if (!["https:", "http:"].includes(manifest.protocol)) throw new Error("protocol");
+    if (manifest.protocol !== "https:" || manifest.username || manifest.password) throw new Error("protocol");
   } catch {
-    setStatus(sourceStatus, "أدخل رابط HTTP أو HTTPS صحيحاً.", true);
+    setStatus(sourceStatus, "أدخل رابط HTTPS صحيحاً وآمناً.", true);
     return;
   }
 
