@@ -401,7 +401,7 @@ async function inspectAddon(addon) {
       button.type = "button";
       button.className = "filter";
       button.textContent = entry.name || (entry.type + " · " + entry.id);
-      button.addEventListener("click", () => loadAddonCatalog(addon, entry, button));
+      button.addEventListener("click", () => configureAddonCatalog(addon, entry, button));
       catalogButtons.append(button);
     });
     addonCatalogResults.append(catalogButtons);
@@ -411,7 +411,73 @@ async function inspectAddon(addon) {
   }
 }
 
-async function loadAddonCatalog(addon, entry, activeButton) {
+function configureAddonCatalog(addon, entry, activeButton) {
+  addonCatalogResults.querySelector(".addon-extra-form")?.remove();
+  const specs = Array.isArray(entry.extra) ? entry.extra : [];
+  const required = Array.isArray(entry.extraRequired) ? entry.extraRequired : [];
+  const names = [...new Set([...required, ...specs.map(spec => spec?.name).filter(Boolean)])];
+  if (!names.length) {
+    loadAddonCatalog(addon, entry, activeButton, {});
+    return;
+  }
+
+  const form = document.createElement("form");
+  form.className = "addon-extra-form";
+  const heading = document.createElement("strong");
+  heading.textContent = "خيارات الكتالوج";
+  form.append(heading);
+
+  names.slice(0, 8).forEach(name => {
+    const spec = specs.find(item => item?.name === name) || {};
+    const isRequired = required.includes(name) || spec.isRequired === true;
+    const label = document.createElement("label");
+    label.textContent = name + (isRequired ? " *" : "");
+    let field;
+    if (Array.isArray(spec.options) && spec.options.length) {
+      field = document.createElement("select");
+      const emptyOption = document.createElement("option");
+      emptyOption.value = "";
+      emptyOption.textContent = isRequired ? "اختر قيمة" : "الكل";
+      field.append(emptyOption);
+      spec.options.forEach(option => {
+        const item = document.createElement("option");
+        item.value = String(option);
+        item.textContent = String(option);
+        field.append(item);
+      });
+    } else {
+      field = document.createElement("input");
+      field.type = name === "skip" ? "number" : "text";
+      if (name === "skip") {
+        field.min = "0";
+        field.value = "0";
+      }
+      field.placeholder = name === "search" ? "اكتب كلمة البحث" : name;
+    }
+    field.name = name;
+    field.required = isRequired;
+    label.append(field);
+    form.append(label);
+  });
+
+  const submit = document.createElement("button");
+  submit.type = "submit";
+  submit.className = "primary-btn";
+  submit.textContent = "تطبيق وعرض العناوين";
+  form.append(submit);
+  form.addEventListener("submit", event => {
+    event.preventDefault();
+    const params = {};
+    new FormData(form).forEach((value, key) => {
+      if (String(value).trim() !== "") params[key] = String(value).trim();
+    });
+    loadAddonCatalog(addon, entry, activeButton, params);
+  });
+  addonCatalogResults.querySelector(".addon-extra-form")?.remove();
+  addonCatalogResults.querySelector(".addon-catalog-buttons")?.after(form);
+}
+
+async function loadAddonCatalog(addon, entry, activeButton, extra = {}) {
   addonCatalogResults.querySelectorAll(".addon-catalog-buttons button")
     .forEach(button => button.classList.toggle("active", button === activeButton));
   const results = document.createElement("div");
@@ -422,7 +488,7 @@ async function loadAddonCatalog(addon, entry, activeButton) {
   addonCatalogResults.querySelector(".addon-meta-grid")?.remove();
   addonCatalogResults.append(loading);
   try {
-    const url = addonEndpoint(addon.manifest_url, ["catalog", entry.type, entry.id], {skip: 0});
+    const url = addonEndpoint(addon.manifest_url, ["catalog", entry.type, entry.id], {skip: 0, ...extra});
     const data = await fetchAddonJson(url.href, "الكتالوج");
     const metas = Array.isArray(data?.metas) ? data.metas : [];
     loading.remove();
