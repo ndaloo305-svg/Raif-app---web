@@ -87,3 +87,16 @@
 .addon-heading-text h3{margin:0 0 5px}
 .addon-heading-text p{margin:0}
 .addon-stream-row .stream-play-btn{margin-top:9px}
+
+
+.addon-subtitle-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 18px;
+}
+.addon-subtitle-list .subtitle-choice {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+}
