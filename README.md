@@ -48,4 +48,4 @@ The source manager can now read an enabled add-on's HTTPS Manifest and list the 
 - Catalog requests are made directly from the browser; the add-on server must allow cross-origin requests (CORS).
 - Only HTTPS Manifest and poster URLs are accepted.
 - Responses are limited to 1.5 MB and requests time out after 12 seconds.
-- This is catalog browsing only. Stream resolution, playback, and add-on catalogs that require custom extra parameters are not implemented yet.
+- Catalog browsing supports required and optional extra parameters declared by the add-on. Stream resolution and playback are not implemented yet.
