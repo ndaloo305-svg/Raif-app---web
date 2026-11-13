@@ -347,7 +347,7 @@ function addonEndpoint(manifestUrl, parts, query = {}) {
   const endpoint = new URL(manifest.href);
   endpoint.search = "";
   endpoint.hash = "";
-  endpoint.pathname = endpoint.pathname.replace(/\\/g, "/").replace(/manifest\\.json$/i, "");
+  endpoint.pathname = endpoint.pathname.replace(/manifest[.]json$/i, "");
   if (!endpoint.pathname.endsWith("/")) endpoint.pathname += "/";
   endpoint.pathname += parts.map(part => encodeURIComponent(String(part))).join("/") + ".json";
   for (const [key, value] of Object.entries(query)) {
