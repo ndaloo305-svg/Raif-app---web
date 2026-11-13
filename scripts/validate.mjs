@@ -2,11 +2,11 @@ import { readFileSync } from "node:fs";
 
 const html = readFileSync("index.html", "utf8");
 const js = readFileSync("app.js", "utf8");
-const ids = [...html.matchAll(/\\bid="([^"]+)"/g)].map(match => match[1]);
+const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]);
 const duplicates = ids.filter((id, index) => ids.indexOf(id) !== index);
 if (duplicates.length) throw new Error("Duplicate HTML IDs: " + [...new Set(duplicates)].join(", "));
 
-const selectors = [...js.matchAll(/document\\.querySelector(?:All)?\\(["']#([^"']+)["']\\)/g)]
+const selectors = [...js.matchAll(/document\.querySelector(?:All)?\(["']#([^"']+)["']\)/g)]
   .map(match => match[1]);
 const missing = [...new Set(selectors.filter(id => !ids.includes(id)))];
 if (missing.length) throw new Error("JavaScript references missing HTML IDs: " + missing.join(", "));
