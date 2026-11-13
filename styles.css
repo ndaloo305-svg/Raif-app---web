@@ -52,3 +52,9 @@
 .addon-catalog-results .is-error{color:#ff9b9b}
 .source-actions .save-btn:disabled{opacity:.45;cursor:not-allowed}
 @media(max-width:600px){.addon-meta-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+.addon-extra-form{display:flex;align-items:end;flex-wrap:wrap;gap:10px;padding:14px;margin:12px 0 18px;border:1px solid var(--line);border-radius:12px;background:#17181d}
+.addon-extra-form strong{width:100%;font-size:13px}
+.addon-extra-form label{display:grid;gap:6px;min-width:145px;color:#c4c6ce;font-size:12px}
+.addon-extra-form input,.addon-extra-form select{min-width:145px;max-width:220px;border:1px solid var(--line);border-radius:8px;background:#101114;color:white;padding:9px;font:12px "IBM Plex Sans Arabic",system-ui,sans-serif}
+.addon-extra-form .primary-btn{padding:10px 14px}
