@@ -992,7 +992,7 @@ document.querySelector("#source-import-button").addEventListener("click", async 
             typeof resource === "string" ? resource : resource?.name
           ).filter(Boolean);
           const supported = resources.some(resource =>
-            ["catalog", "stream", "subtitles", "meta"].includes(resource)
+            ["catalog", "subtitles"].includes(resource)
           );
           if (!supported) { skipped++; continue; }
           accepted.push({
