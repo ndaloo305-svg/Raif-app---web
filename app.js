@@ -276,17 +276,6 @@ async function loadSources() {
     url.textContent = addon.manifest_url;
     details.append(name, url);
     identity.append(details);
-    fetchAddonResource(addon, "manifest").then(manifest => {
-      const asset = safeAddonAssetUrl(manifest?.logo || manifest?.icon, addon.manifest_url);
-      if (!asset) return;
-      const image = document.createElement("img");
-      image.src = asset.href;
-      image.alt = "";
-      image.loading = "lazy";
-      image.referrerPolicy = "no-referrer";
-      image.onerror = () => image.remove();
-      logo.replaceChildren(image);
-    }).catch(() => {});
 
     const actions = document.createElement("div");
     actions.className = "source-actions";
@@ -979,39 +968,45 @@ document.querySelector("#source-import-button").addEventListener("click", async 
       .from("user_addons").select("manifest_url").eq("user_id", currentUser.id);
     if (existingError) throw new Error("تعذر قراءة المصادر الحالية.");
     const known = new Set((existing || []).map(row => row.manifest_url));
+    if (sources.length > 100) throw new Error("يمكن استيراد 100 مصدر كحد أقصى في المرة الواحدة.");
     const accepted = [];
     let skipped = 0, failed = 0, duplicates = 0;
-    for (const source of sources) {
-      const rawUrl = typeof source?.url === "string" ? source.url.trim() : "";
-      let url;
-      try {
-        url = new URL(rawUrl);
-        if (url.protocol !== "https:" || url.username || url.password) throw new Error("unsafe");
-      } catch { skipped++; continue; }
-      if (shouldSkipAddon(source)) { skipped++; continue; }
-      if (known.has(url.href)) { duplicates++; continue; }
-      try {
-        const manifest = await fetchAddonManifestByUrl(url.href);
-        if (!manifest || typeof manifest !== "object" || !manifest.id ||
-            !Array.isArray(manifest.resources)) { failed++; continue; }
-        const resources = manifest.resources.map(resource =>
-          typeof resource === "string" ? resource : resource?.name
-        ).filter(Boolean);
-        const supported = resources.some(resource =>
-          ["catalog", "stream", "subtitles", "meta"].includes(resource)
-        );
-        if (!supported) { skipped++; continue; }
-        accepted.push({
-          user_id: currentUser.id,
-          addon_id: String(manifest.id).slice(0, 255),
-          name: String(source.name || manifest.name || manifest.id).slice(0, 100),
-          manifest_url: url.href,
-          enabled: true,
-          config: {raif_imported: true, resources}
-        });
+    let cursor = 0;
+    const inspectNext = async () => {
+      while (cursor < sources.length) {
+        const source = sources[cursor++];
+        const rawUrl = typeof source?.url === "string" ? source.url.trim() : "";
+        let url;
+        try {
+          url = new URL(rawUrl);
+          if (url.protocol !== "https:" || url.username || url.password) throw new Error("unsafe");
+        } catch { skipped++; continue; }
+        if (shouldSkipAddon(source)) { skipped++; continue; }
+        if (known.has(url.href)) { duplicates++; continue; }
         known.add(url.href);
-      } catch { failed++; }
-    }
+        try {
+          const manifest = await fetchAddonManifestByUrl(url.href);
+          if (!manifest || typeof manifest !== "object" || !manifest.id ||
+              !Array.isArray(manifest.resources)) { failed++; continue; }
+          const resources = manifest.resources.map(resource =>
+            typeof resource === "string" ? resource : resource?.name
+          ).filter(Boolean);
+          const supported = resources.some(resource =>
+            ["catalog", "stream", "subtitles", "meta"].includes(resource)
+          );
+          if (!supported) { skipped++; continue; }
+          accepted.push({
+            user_id: currentUser.id,
+            addon_id: String(manifest.id).slice(0, 255),
+            name: String(source.name || manifest.name || manifest.id).slice(0, 100),
+            manifest_url: url.href,
+            enabled: true,
+            config: {raif_imported: true, resources}
+          });
+        } catch { failed++; }
+      }
+    };
+    await Promise.all(Array.from({length: Math.min(5, sources.length)}, () => inspectNext()));
     if (accepted.length) {
       const { error } = await supabase.from("user_addons").insert(accepted);
       if (error) throw new Error("تعذر حفظ المصادر المتوافقة في حسابك.");
