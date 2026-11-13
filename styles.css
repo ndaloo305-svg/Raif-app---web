@@ -37,3 +37,18 @@
   .mobile-nav .nav-item small{font:10px "IBM Plex Sans Arabic",system-ui,sans-serif;white-space:nowrap}
   .mobile-nav .nav-item.active{box-shadow:inset 0 2px var(--accent)}
 }
+
+.addon-catalog-results{max-width:1000px;margin-top:28px;scroll-margin-top:24px}
+.addon-results-heading{margin:22px 0 14px}
+.addon-results-heading h3{margin:0 0 5px;font-size:20px}
+.addon-results-heading p{margin:0;color:var(--muted);font-size:13px}
+.addon-catalog-buttons{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 20px}
+.addon-meta-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(135px,1fr));gap:15px}
+.addon-meta-card{min-width:0;display:flex;flex-direction:column;gap:7px}
+.addon-meta-card img,.addon-meta-poster{width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:11px;background:#242630;border:1px solid var(--line)}
+.addon-meta-poster{display:grid;place-items:center;color:var(--accent);font-weight:800;letter-spacing:2px}
+.addon-meta-card strong{font-size:13px;line-height:1.5}
+.addon-meta-card span{font-size:11px;color:var(--muted)}
+.addon-catalog-results .is-error{color:#ff9b9b}
+.source-actions .save-btn:disabled{opacity:.45;cursor:not-allowed}
+@media(max-width:600px){.addon-meta-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
