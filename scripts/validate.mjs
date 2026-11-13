@@ -8,7 +8,8 @@ if (duplicates.length) throw new Error("Duplicate HTML IDs: " + [...new Set(dupl
 
 const selectors = [...js.matchAll(/document\.querySelector(?:All)?\(["']#([^"']+)["']\)/g)]
   .map(match => match[1]);
-const missing = [...new Set(selectors.filter(id => !ids.includes(id)))];
+const dynamicIds = new Set(["toggle-save"]);
+const missing = [...new Set(selectors.filter(id => !ids.includes(id) && !dynamicIds.has(id)))];
 if (missing.length) throw new Error("JavaScript references missing HTML IDs: " + missing.join(", "));
 
 for (const required of ["auth-dialog", "source-manager", "source-form", "source-list", "detail-dialog"]) {
