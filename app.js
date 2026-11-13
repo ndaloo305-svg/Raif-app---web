@@ -312,11 +312,9 @@ async function loadSources() {
   });
 }
 
-const addonCatalogResults = document.createElement("section");
-addonCatalogResults.id = "source-catalog-results";
+const addonCatalogResults = document.querySelector("#source-catalog-results");
 addonCatalogResults.className = "addon-catalog-results";
 addonCatalogResults.setAttribute("aria-live", "polite");
-document.querySelector("#source-list").after(addonCatalogResults);
 
 function safeHttpsUrl(value) {
   try {
