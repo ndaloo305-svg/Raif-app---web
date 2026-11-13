@@ -411,6 +411,49 @@ async function inspectAddon(addon) {
   }
 }
 
+let activeHlsPlayer = null;
+function disposeStreamPlayer() {
+  const video = document.querySelector("#raif-video");
+  if (activeHlsPlayer) { activeHlsPlayer.destroy(); activeHlsPlayer = null; }
+  if (video) { video.pause(); video.removeAttribute("src"); video.load(); }
+}
+async function openStreamPlayer(rawUrl, title = "RAIF Player") {
+  let target;
+  try { target = new URL(rawUrl); } catch { throw new Error("رابط التشغيل غير صالح."); }
+  if (!["https:", "http:"].includes(target.protocol) || target.username || target.password) throw new Error("المشغل يقبل روابط HTTP وHTTPS فقط.");
+  if (target.protocol === "http:" && location.protocol === "https:") throw new Error("المتصفح يمنع تشغيل HTTP داخل صفحة HTTPS. استخدم رابط HTTPS.");
+  const dialog = document.querySelector("#player-dialog");
+  const video = document.querySelector("#raif-video");
+  const status = document.querySelector("#player-status");
+  document.querySelector("#player-title").textContent = title;
+  status.textContent = "جارٍ تجهيز المشغل...";
+  status.classList.remove("is-error");
+  disposeStreamPlayer();
+  dialog.showModal();
+  const isHls = target.pathname.toLowerCase().endsWith(".m3u8");
+  video.onerror = () => { status.textContent = "تعذر تشغيل الرابط. قد لا يكون ملف فيديو مباشراً أو قد يمنع الخادم التشغيل عبر CORS."; status.classList.add("is-error"); };
+  video.onplaying = () => { status.textContent = "يتم التشغيل داخل RAIF."; status.classList.remove("is-error"); };
+  if (isHls && video.canPlayType("application/vnd.apple.mpegurl")) {
+    video.src = target.href;
+    status.textContent = "تم تجهيز بث HLS. اضغط تشغيل.";
+  } else if (isHls) {
+    try {
+      const {default: Hls} = await import("https://esm.sh/hls.js@1.6.13");
+      if (!Hls.isSupported()) throw new Error("المتصفح لا يدعم HLS عبر Media Source Extensions.");
+      activeHlsPlayer = new Hls({enableWorker:true, lowLatencyMode:false, maxBufferLength:30});
+      activeHlsPlayer.attachMedia(video);
+      activeHlsPlayer.on(Hls.Events.MEDIA_ATTACHED, () => activeHlsPlayer?.loadSource(target.href));
+      activeHlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => { status.textContent = "تم تحميل قائمة HLS. اضغط تشغيل."; });
+      activeHlsPlayer.on(Hls.Events.ERROR, (_event, data) => {
+        if (data.fatal) { status.textContent = "تعذر تشغيل HLS. تحقق من الرابط ودعم CORS."; status.classList.add("is-error"); disposeStreamPlayer(); }
+      });
+    } catch (error) { status.textContent = "تعذر تجهيز HLS: " + error.message; status.classList.add("is-error"); }
+  } else {
+    video.src = target.href;
+    status.textContent = "تم إرسال الرابط إلى مشغل المتصفح. اضغط تشغيل.";
+  }
+}
+
 async function openAddonMeta(addon, catalogEntry, catalogMeta) {
   const dialog = document.querySelector("#detail-dialog");
   const content = document.querySelector("#detail-content");
@@ -479,6 +522,20 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
               link.rel = "noopener noreferrer";
               link.textContent = "فتح رابط المصدر";
               row.append(link);
+              const play = document.createElement("button");
+              play.type = "button";
+              play.className = "save-btn stream-play-btn";
+              play.textContent = "تشغيل داخل RAIF";
+              play.addEventListener("click", async () => {
+                try { await openStreamPlayer(target.href, name.textContent); }
+                catch (error) {
+                  const note = document.createElement("small");
+                  note.className = "is-error";
+                  note.textContent = error.message;
+                  row.append(note);
+                }
+              });
+              row.append(play);
               if (target.protocol === "http:" && location.protocol === "https:") {
                 const warning = document.createElement("small");
                 warning.textContent = "قد يمنع المتصفح فتح HTTP من صفحة HTTPS.";
@@ -707,6 +764,12 @@ document.querySelectorAll(".filter").forEach(button => button.addEventListener("
 
 search.addEventListener("input", render);
 document.querySelector("#close-dialog").addEventListener("click", () => document.querySelector("#detail-dialog").close());
+document.querySelector("#close-player").addEventListener("click", () => {
+  document.querySelector("#player-dialog").close();
+  disposeStreamPlayer();
+});
+document.querySelector("#player-dialog").addEventListener("close", disposeStreamPlayer);
+
 document.querySelector("#detail-dialog").addEventListener("click", event => {
   if (event.target.id === "detail-dialog") event.currentTarget.close();
 });
