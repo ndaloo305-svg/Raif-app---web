@@ -22,6 +22,7 @@
         <button class="nav-item" data-view="series"><span>▤</span> المسلسلات</button>
         <button class="nav-item" data-view="anime"><span>✦</span> الأنمي</button>
         <button class="nav-item" data-view="library"><span>▧</span> مكتبتي</button>
+        <button class="nav-item" data-view="sources"><span>⌘</span> مصادري</button>
       </nav>
       <div class="sidebar-bottom"><span class="status-dot"></span> واجهة تجريبية — مصادر البث غير مربوطة</div>
     </aside>
@@ -44,6 +45,19 @@
         <div class="section-heading"><div><span class="eyebrow">مختارة لك</span><h2 id="section-title">اكتشف المحتوى</h2></div><div class="filters" id="filters"><button class="filter active" data-filter="all">الكل</button><button class="filter" data-filter="movie">أفلام</button><button class="filter" data-filter="series">مسلسلات</button><button class="filter" data-filter="anime">أنمي</button></div></div>
         <div class="catalog-grid" id="catalog" aria-live="polite"></div>
         <p class="empty-state" id="empty" hidden>لا توجد نتائج مطابقة. جرّب كلمة بحث أخرى.</p>
+      </section>
+      <section class="content-section source-manager" id="source-manager" hidden>
+        <div class="section-heading"><div><span class="eyebrow">YOUR SOURCES</span><h2>إدارة الإضافات والمصادر</h2></div></div>
+        <p class="source-intro">أضف روابط Manifest الخاصة بإضافات Stremio واحفظها في حسابك على RAIF. هذه المرحلة تحفظ بيانات المصدر فقط؛ لم يتم جلب الكتالوج أو تشغيل روابط البث بعد.</p>
+        <form id="source-form" class="source-form">
+          <label for="source-name">اسم المصدر (اختياري)</label>
+          <input id="source-name" type="text" maxlength="100" placeholder="مثال: مصدر الأفلام">
+          <label for="source-url">رابط Manifest</label>
+          <input id="source-url" type="url" inputmode="url" placeholder="https://example.com/manifest.json" required>
+          <button class="primary-btn" id="source-submit" type="submit">＋ حفظ المصدر</button>
+        </form>
+        <p class="auth-status" id="source-status" role="status"></p>
+        <div id="source-list" class="source-list" aria-live="polite"></div>
       </section>
       <footer><span>RAIF</span><span>واجهة أولية قيد التطوير</span></footer>
     </main>
