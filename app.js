@@ -276,7 +276,7 @@ async function loadSources() {
     url.textContent = addon.manifest_url;
     details.append(name, url);
     identity.append(details);
-    fetchAddonJson(addon.manifest_url, "Manifest").then(manifest => {
+    fetchAddonResource(addon, "manifest").then(manifest => {
       const asset = safeAddonAssetUrl(manifest?.logo || manifest?.icon, addon.manifest_url);
       if (!asset) return;
       const image = document.createElement("img");
@@ -337,50 +337,26 @@ function safeAddonAssetUrl(value, manifestUrl) {
   }
 }
 
-async function fetchAddonJson(url, label) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 12000);
-  try {
-    const response = await fetch(url, {
-      method: "GET",
-      mode: "cors",
-      credentials: "omit",
-      redirect: "follow",
-      headers: {Accept: "application/json"},
-      signal: controller.signal
-    });
-    if (!response.ok) throw new Error(label + " أعاد HTTP " + response.status);
-    const length = Number(response.headers.get("content-length") || 0);
-    if (length > 1_500_000) throw new Error("حجم استجابة المصدر أكبر من الحد المسموح.");
-    const raw = await response.text();
-    if (raw.length > 1_500_000) throw new Error("حجم استجابة المصدر أكبر من الحد المسموح.");
-    try {
-      return JSON.parse(raw);
-    } catch {
-      throw new Error("استجابة المصدر ليست JSON صالحاً.");
-    }
-  } catch (error) {
-    if (error.name === "AbortError") throw new Error("انتهت مهلة الاتصال بالمصدر.");
-    if (error instanceof TypeError) throw new Error("تعذر الوصول للمصدر. تحقق من الرابط أو دعم CORS في خادم الإضافة.");
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-  }
+async function invokeAddonProxy(body, label = "المصدر") {
+  const {data, error} = await supabase.functions.invoke("raif-addon-proxy", {body});
+  if (error) throw new Error("تعذر الاتصال بخدمة " + label + ": " + error.message);
+  if (data?.error) throw new Error(data.error);
+  return data;
 }
 
-function addonEndpoint(manifestUrl, parts, query = {}) {
-  const manifest = safeHttpsUrl(manifestUrl);
-  if (!manifest) throw new Error("يجب أن يكون رابط Manifest آمناً ويستخدم HTTPS.");
-  const endpoint = new URL(manifest.href);
-  endpoint.search = "";
-  endpoint.hash = "";
-  endpoint.pathname = endpoint.pathname.replace(/manifest[.]json$/i, "");
-  if (!endpoint.pathname.endsWith("/")) endpoint.pathname += "/";
-  endpoint.pathname += parts.map(part => encodeURIComponent(String(part))).join("/") + ".json";
-  for (const [key, value] of Object.entries(query)) {
-    if (value !== undefined && value !== null && value !== "") endpoint.searchParams.set(key, String(value));
-  }
-  return endpoint;
+function fetchAddonResource(addon, resource, type, contentId, query = {}) {
+  return invokeAddonProxy({
+    action: resource === "manifest" ? "manifest" : "resource",
+    addon_id: addon.id,
+    resource,
+    type,
+    content_id: contentId,
+    query
+  }, resource === "manifest" ? "Manifest" : resource);
+}
+
+function fetchAddonManifestByUrl(manifestUrl) {
+  return invokeAddonProxy({action:"inspect_url", manifest_url:manifestUrl}, "Manifest");
 }
 
 function renderAddonMessage(message, isError = false) {
@@ -398,7 +374,7 @@ async function inspectAddon(addon) {
   try {
     const manifestUrl = safeHttpsUrl(addon.manifest_url);
     if (!manifestUrl) throw new Error("الرابط غير آمن. استخدم رابط HTTPS صحيحاً.");
-    const manifest = await fetchAddonJson(manifestUrl.href, "Manifest");
+    const manifest = await fetchAddonResource(addon, "manifest");
     if (!manifest || typeof manifest !== "object" || !manifest.id || !manifest.name ||
         !Array.isArray(manifest.resources) || !Array.isArray(manifest.catalogs)) {
       throw new Error("ملف Manifest لا يطابق بنية إضافة Stremio المتوقعة.");
@@ -498,31 +474,20 @@ function subtitleToVtt(raw) {
   return "WEBVTT\n\n" + value;
 }
 
-async function fetchSubtitleFile(subtitle) {
-  const url = safeHttpsUrl(subtitle.url);
-  if (!url) throw new Error("رابط الترجمة غير آمن.");
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 12000);
-  try {
-    const response = await fetch(url.href, {
-      method:"GET", mode:"cors", credentials:"omit",
-      headers:{Accept:"text/vtt,text/plain,application/x-subrip,*/*"},
-      signal:controller.signal
-    });
-    if (!response.ok) throw new Error("تعذر تحميل الترجمة (HTTP " + response.status + ").");
-    const length = Number(response.headers.get("content-length") || 0);
-    if (length > 5000000) throw new Error("ملف الترجمة أكبر من الحد المسموح.");
-    const raw = await response.text();
-    if (raw.length > 5000000) throw new Error("ملف الترجمة أكبر من الحد المسموح.");
-    const vtt = subtitleToVtt(raw);
-    return URL.createObjectURL(new Blob([vtt], {type:"text/vtt;charset=utf-8"}));
-  } catch (error) {
-    if (error.name === "AbortError") throw new Error("انتهت مهلة تحميل الترجمة.");
-    if (error instanceof TypeError) throw new Error("تعذر تحميل الترجمة؛ قد يمنع الخادم الوصول عبر CORS.");
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-  }
+async function fetchSubtitleFile(subtitle, catalogEntry, meta) {
+  const {data, error} = await supabase.functions.invoke("raif-addon-proxy", {
+    body: {
+      action:"subtitle_file",
+      addon_id:subtitle.addonId,
+      type:catalogEntry.type,
+      content_id:meta.id,
+      subtitle_url:subtitle.url
+    }
+  });
+  if (error) throw new Error("تعذر تحميل الترجمة: " + error.message);
+  if (typeof data?.content !== "string") throw new Error(data?.error || "ملف الترجمة غير صالح.");
+  const vtt = subtitleToVtt(data.content);
+  return URL.createObjectURL(new Blob([vtt], {type:"text/vtt;charset=utf-8"}));
 }
 
 async function findSubtitles(meta, catalogEntry, area, button) {
@@ -542,12 +507,12 @@ async function findSubtitles(meta, catalogEntry, area, button) {
     return;
   }
   const results = await Promise.allSettled(candidates.map(async addon => {
-    const endpoint = addonEndpoint(addon.manifest_url, ["subtitles", catalogEntry.type, meta.id]);
-    const data = await fetchAddonJson(endpoint.href, "الترجمات");
+    const data = await fetchAddonResource(addon, "subtitles", catalogEntry.type, meta.id);
     return (Array.isArray(data?.subtitles) ? data.subtitles : [])
       .filter(entry => typeof entry?.url === "string" && safeHttpsUrl(entry.url))
       .map(entry => ({
         url: entry.url,
+        addonId: addon.id,
         label: [entry.lang || entry.language || "ترجمة", addon.name].filter(Boolean).join(" · "),
         language: /^[a-z]{2,3}(?:-[a-z0-9]+)?$/i.test(entry.langCode || "") ? entry.langCode : "und"
       }));
@@ -567,7 +532,7 @@ async function findSubtitles(meta, catalogEntry, area, button) {
         choose.disabled = true;
         choose.textContent = "جارٍ تحميل الترجمة...";
         try {
-          const objectUrl = await fetchSubtitleFile(subtitle);
+          const objectUrl = await fetchSubtitleFile(subtitle, catalogEntry, meta);
           setSelectedSubtitle({objectUrl, label:subtitle.label, language:subtitle.language});
           choose.textContent = "✓ " + (subtitle.label || "تم اختيار الترجمة");
           area.querySelectorAll("button").forEach(item => { if (item !== choose) item.disabled = true; });
@@ -666,7 +631,7 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
 
   try {
     const url = addonEndpoint(addon.manifest_url, ["meta", catalogEntry.type, catalogMeta.id]);
-    const result = await fetchAddonJson(url.href, "تفاصيل العنوان");
+    const result = await fetchAddonResource(addon, "meta", catalogEntry.type, meta.id);
     const meta = result?.meta || catalogMeta;
     summary.textContent = meta.description || "لا توجد تفاصيل إضافية لهذا العنوان.";
     const facts = document.createElement("p");
@@ -705,7 +670,7 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
       streamsArea.replaceChildren();
       try {
         const streamUrl = addonEndpoint(addon.manifest_url, ["stream", catalogEntry.type, meta.id]);
-        const streamData = await fetchAddonJson(streamUrl.href, "مصادر التشغيل");
+        const streamData = await fetchAddonResource(addon, "stream", catalogEntry.type, meta.id);
         const rawStreams = Array.isArray(streamData?.streams) ? streamData.streams : [];
         const streams = rawStreams.filter(stream => {
           if (stream?.infoHash || stream?.externalUrl || stream?.ytId || stream?.behaviorHints?.notWebReady) return false;
@@ -875,7 +840,7 @@ async function loadAddonCatalog(addon, entry, activeButton, extra = {}) {
   addonCatalogResults.append(loading);
   try {
     const url = addonEndpoint(addon.manifest_url, ["catalog", entry.type, entry.id], {skip: 0, ...extra});
-    const data = await fetchAddonJson(url.href, "الكتالوج");
+    const data = await fetchAddonResource(addon, "catalog", entry.type, entry.id, {skip:0, ...extra});
     const metas = Array.isArray(data?.metas) ? data.metas : [];
     loading.remove();
     if (!metas.length) {
@@ -1029,7 +994,7 @@ document.querySelector("#source-import-button").addEventListener("click", async 
       if (shouldSkipAddon(source)) { skipped++; continue; }
       if (known.has(url.href)) { duplicates++; continue; }
       try {
-        const manifest = await fetchAddonJson(url.href, "Manifest");
+        const manifest = await fetchAddonManifestByUrl(url.href);
         if (!manifest || typeof manifest !== "object" || !manifest.id ||
             !Array.isArray(manifest.resources)) { failed++; continue; }
         const resources = manifest.resources.map(resource =>
