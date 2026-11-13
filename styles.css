@@ -28,3 +28,12 @@
 .source-remove{border:1px solid #6c3434;background:transparent;color:#ffaaaa;border-radius:9px;padding:8px 13px;font:13px "IBM Plex Sans Arabic",system-ui,sans-serif;cursor:pointer}
 .source-actions .save-btn{font-size:12px;padding:8px 12px}
 @media(max-width:600px){.source-card{align-items:flex-start;flex-direction:column}.source-actions{width:100%}.source-form{padding:15px}}
+
+@media(max-width:760px){
+  .main-content{padding-bottom:84px}
+  .mobile-nav{position:fixed;z-index:20;inset:auto 0 0;display:flex;justify-content:space-around;gap:2px;padding:8px 5px calc(8px + env(safe-area-inset-bottom));background:#14161bf2;border-top:1px solid var(--line);backdrop-filter:blur(16px)}
+  .mobile-nav .nav-item{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:6px 2px;border-radius:9px;font-size:10px;text-align:center}
+  .mobile-nav .nav-item span{font-size:18px;width:auto}
+  .mobile-nav .nav-item small{font:10px "IBM Plex Sans Arabic",system-ui,sans-serif;white-space:nowrap}
+  .mobile-nav .nav-item.active{box-shadow:inset 0 2px var(--accent)}
+}
