@@ -262,6 +262,12 @@ async function loadSources() {
   addons.forEach(addon => {
     const card = document.createElement("article");
     card.className = "source-card";
+    const identity = document.createElement("div");
+    identity.className = "source-identity";
+    const logo = document.createElement("div");
+    logo.className = "source-logo";
+    logo.textContent = "R";
+    identity.append(logo);
     const details = document.createElement("div");
     details.className = "source-details";
     const name = document.createElement("strong");
@@ -269,6 +275,18 @@ async function loadSources() {
     const url = document.createElement("span");
     url.textContent = addon.manifest_url;
     details.append(name, url);
+    identity.append(details);
+    fetchAddonJson(addon.manifest_url, "Manifest").then(manifest => {
+      const asset = safeAddonAssetUrl(manifest?.logo || manifest?.icon, addon.manifest_url);
+      if (!asset) return;
+      const image = document.createElement("img");
+      image.src = asset.href;
+      image.alt = "";
+      image.loading = "lazy";
+      image.referrerPolicy = "no-referrer";
+      image.onerror = () => image.remove();
+      logo.replaceChildren(image);
+    }).catch(() => {});
 
     const actions = document.createElement("div");
     actions.className = "source-actions";
@@ -289,7 +307,7 @@ async function loadSources() {
     remove.textContent = "حذف";
     remove.addEventListener("click", () => deleteSource(addon.id));
     actions.append(browse, toggle, remove);
-    card.append(details, actions);
+    card.append(identity, actions);
     list.append(card);
   });
 }
@@ -303,6 +321,17 @@ document.querySelector("#source-list").after(addonCatalogResults);
 function safeHttpsUrl(value) {
   try {
     const url = new URL(value);
+    if (url.protocol !== "https:" || url.username || url.password) return null;
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+function safeAddonAssetUrl(value, manifestUrl) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const url = new URL(value, manifestUrl);
     if (url.protocol !== "https:" || url.username || url.password) return null;
     return url;
   } catch {
@@ -390,7 +419,21 @@ async function inspectAddon(addon) {
     title.textContent = manifest.name;
     const subtitle = document.createElement("p");
     subtitle.textContent = manifest.description || "اختر كتالوجاً لعرض عناوينه.";
-    heading.append(title, subtitle);
+    const manifestIcon = safeAddonAssetUrl(manifest.logo || manifest.icon, manifestUrl.href);
+    if (manifestIcon) {
+      const icon = document.createElement("img");
+      icon.className = "addon-manifest-icon";
+      icon.src = manifestIcon.href;
+      icon.alt = "";
+      icon.loading = "lazy";
+      icon.referrerPolicy = "no-referrer";
+      icon.onerror = () => icon.remove();
+      heading.append(icon);
+    }
+    const headingText = document.createElement("div");
+    headingText.className = "addon-heading-text";
+    headingText.append(title, subtitle);
+    heading.append(headingText);
     addonCatalogResults.append(heading);
 
     const catalogButtons = document.createElement("div");
@@ -412,12 +455,14 @@ async function inspectAddon(addon) {
 }
 
 let activeHlsPlayer = null;
+let activeDashPlayer = null;
 function disposeStreamPlayer() {
   const video = document.querySelector("#raif-video");
   if (activeHlsPlayer) { activeHlsPlayer.destroy(); activeHlsPlayer = null; }
+  if (activeDashPlayer) { activeDashPlayer.reset(); activeDashPlayer = null; }
   if (video) { video.pause(); video.removeAttribute("src"); video.load(); }
 }
-async function openStreamPlayer(rawUrl, title = "RAIF Player") {
+async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}) {
   let target;
   try { target = new URL(rawUrl); } catch { throw new Error("رابط التشغيل غير صالح."); }
   if (!["https:", "http:"].includes(target.protocol) || target.username || target.password) throw new Error("المشغل يقبل روابط HTTP وHTTPS فقط.");
@@ -430,8 +475,12 @@ async function openStreamPlayer(rawUrl, title = "RAIF Player") {
   status.classList.remove("is-error");
   disposeStreamPlayer();
   dialog.showModal();
-  const isHls = target.pathname.toLowerCase().endsWith(".m3u8");
-  video.onerror = () => { status.textContent = "تعذر تشغيل الرابط. قد لا يكون ملف فيديو مباشراً أو قد يمنع الخادم التشغيل عبر CORS."; status.classList.add("is-error"); };
+  const mime = String(stream.behaviorHints?.mimeType || stream.mimeType || stream.type || "").toLowerCase();
+  const filename = String(stream.behaviorHints?.filename || stream.filename || "");
+  const mediaHint = (target.pathname + " " + filename).toLowerCase();
+  const isHls = /\\.m3u8(?:$|[?#\\s])/.test(mediaHint) || /mpegurl|vnd\\.apple\\.mpegurl/.test(mime);
+  const isDash = /\\.mpd(?:$|[?#\\s])/.test(mediaHint) || /dash\\+xml/.test(mime);
+  video.onerror = () => { status.textContent = "تعذر تشغيل الرابط. تأكد أن الرابط ملف وسائط مباشر، وأن الخادم يسمح بالوصول من المتصفح (CORS)."; status.classList.add("is-error"); };
   video.onplaying = () => { status.textContent = "يتم التشغيل داخل RAIF."; status.classList.remove("is-error"); };
   if (isHls && video.canPlayType("application/vnd.apple.mpegurl")) {
     video.src = target.href;
@@ -445,12 +494,24 @@ async function openStreamPlayer(rawUrl, title = "RAIF Player") {
       activeHlsPlayer.on(Hls.Events.MEDIA_ATTACHED, () => activeHlsPlayer?.loadSource(target.href));
       activeHlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => { status.textContent = "تم تحميل قائمة HLS. اضغط تشغيل."; });
       activeHlsPlayer.on(Hls.Events.ERROR, (_event, data) => {
-        if (data.fatal) { status.textContent = "تعذر تشغيل HLS. تحقق من الرابط ودعم CORS."; status.classList.add("is-error"); disposeStreamPlayer(); }
+        if (data.fatal) { status.textContent = "تعذر تشغيل HLS. تحقق من الرابط ودعم CORS."; status.classList.add("is-error"); }
       });
     } catch (error) { status.textContent = "تعذر تجهيز HLS: " + error.message; status.classList.add("is-error"); }
+  } else if (isDash) {
+    try {
+      const module = await import("https://esm.sh/dashjs@5.0.3");
+      const dashjs = module.default || module;
+      activeDashPlayer = dashjs.MediaPlayer().create();
+      activeDashPlayer.initialize(video, target.href, false);
+      activeDashPlayer.on(dashjs.MediaPlayer.events.ERROR, () => {
+        status.textContent = "تعذر تشغيل DASH. تحقق من الرابط ودعم CORS.";
+        status.classList.add("is-error");
+      });
+      status.textContent = "تم تحميل مشغل DASH. اضغط تشغيل.";
+    } catch (error) { status.textContent = "تعذر تجهيز DASH: " + error.message; status.classList.add("is-error"); }
   } else {
     video.src = target.href;
-    status.textContent = "تم إرسال الرابط إلى مشغل المتصفح. اضغط تشغيل.";
+    status.textContent = "تم إرسال رابط الوسائط إلى المشغل. اضغط تشغيل.";
   }
 }
 
@@ -527,7 +588,7 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
               play.className = "save-btn stream-play-btn";
               play.textContent = "تشغيل داخل RAIF";
               play.addEventListener("click", async () => {
-                try { await openStreamPlayer(target.href, name.textContent); }
+                try { await openStreamPlayer(target.href, name.textContent, stream); }
                 catch (error) {
                   const note = document.createElement("small");
                   note.className = "is-error";
@@ -542,9 +603,26 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
                 row.append(warning);
               }
             }
+          } else if (stream.externalUrl) {
+            const external = safeAddonAssetUrl(stream.externalUrl, addon.manifest_url);
+            const note = document.createElement("small");
+            note.textContent = external ? "هذا المصدر يتطلب فتح خدمة خارجية." : "رابط خارجي غير صالح.";
+            row.append(note);
+            if (external) {
+              const link = document.createElement("a");
+              link.href = external.href;
+              link.target = "_blank";
+              link.rel = "noopener noreferrer";
+              link.textContent = "فتح خدمة المشاهدة";
+              row.append(link);
+            }
           } else if (stream.infoHash) {
             const note = document.createElement("small");
-            note.textContent = "مصدر Torrent: يلزم محرك تشغيل منفصل، ولم يتم ربطه بعد.";
+            note.textContent = "هذا مصدر Torrent. يحتاج محرك Torrent مدمجاً، ولا يمكن تشغيله بمشغل الفيديو المباشر الحالي.";
+            row.append(note);
+          } else if (stream.ytId) {
+            const note = document.createElement("small");
+            note.textContent = "هذا المصدر معرّف فيديو خارجي، وليس رابط ملف مباشر.";
             row.append(note);
           }
           streamsArea.append(row);
