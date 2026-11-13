@@ -17,7 +17,7 @@ python3 -m http.server 8000
 - بحث محلي وتصفية للأفلام والمسلسلات والأنمي (البيانات الحالية تجريبية).
 - تسجيل دخول بالبريد عبر رابط سحري باستخدام Supabase Auth.
 - مزامنة المفضلة في جدول `public.favorites` بمشروع RAIF Supabase.
-- إضافة روابط Manifest الخاصة بإضافات Stremio وحفظها وإدارتها عبر `public.user_addons`، مع قراءة Manifest وجلب الكتالوجات مباشرة من المتصفح.
+- إدارة روابط Manifest الخاصة بإضافات Stremio عبر `public.user_addons`، وقراءة الكتالوجات وتفاصيل العناوين وخيارات التشغيل التي تعلنها الإضافة.
 - بيانات الإضافات والمفضلة مرتبطة بالمستخدم، وتخضع لسياسات RLS الموجودة في قاعدة البيانات.
 - لا توجد مفاتيح service-role أو secret داخل المتصفح.
 - ترحيل المفضلة التجريبية القديمة من Local Storage إلى الحساب بعد تسجيل الدخول.
@@ -33,8 +33,8 @@ python3 -m http.server 8000
 
 ## حدود النسخة الحالية
 - بيانات الأفلام والمسلسلات والأنمي المعروضة تجريبية وليست كتالوج إنتاجياً.
-- جلب Manifest والكتالوجات يعتمد على دعم CORS لدى الإضافة. لا يوجد حتى الآن حل روابط البث أو مشغل فيديو.
-- لم يتم ربط TMDB أو تشغيل مصادر Torrent أو HTTP/HTTPS أو مشغل فيديو.
+- جلب Manifest والكتالوجات وتفاصيل العناوين وخيارات التشغيل يعتمد على دعم CORS لدى الإضافة. روابط التشغيل تُفتح خارج RAIF حالياً.
+- لم يتم ربط TMDB أو تشغيل الفيديو داخل الموقع أو محرك Torrent.
 - المزامنة الحالية تشمل المفضلة وروابط الإضافات؛ قوائم المشاهدة والتقدم وسجل المشاهدة لم تُربط بواجهات الموقع بعد.
 - النشر الحي يحتاج تفعيل GitHub Pages ودمج طلب السحب بعد المراجعة.
 
@@ -43,7 +43,7 @@ python3 -m http.server 8000
 
 ## Stremio catalog browsing
 
-The source manager can now read an enabled add-on's HTTPS Manifest and list the catalogs declared by that add-on. Selecting a catalog requests its first page and renders the returned metadata cards in the browser.
+The source manager reads enabled add-on HTTPS Manifests, lists declared catalogs, supports their extra parameters, displays metadata details, and lists stream options returned by the add-on. Stream URLs currently open outside RAIF.
 
 - Catalog requests are made directly from the browser; the add-on server must allow cross-origin requests (CORS).
 - Only HTTPS Manifest and poster URLs are accepted.
