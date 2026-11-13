@@ -243,7 +243,7 @@ async function loadSources() {
   }
 
   const { data, error } = await supabase.from("user_addons")
-    .select("id,addon_id,name,manifest_url,enabled,created_at")
+    .select("id,addon_id,name,manifest_url,enabled,config,created_at")
     .order("created_at", {ascending:false});
 
   if (error) {
@@ -403,11 +403,16 @@ async function inspectAddon(addon) {
         !Array.isArray(manifest.resources) || !Array.isArray(manifest.catalogs)) {
       throw new Error("ملف Manifest لا يطابق بنية إضافة Stremio المتوقعة.");
     }
-    const supportsCatalog = manifest.resources.some(resource =>
-      resource === "catalog" || (resource && typeof resource === "object" && resource.name === "catalog")
-    );
+    const resourceNames = manifest.resources.map(resource =>
+      typeof resource === "string" ? resource : resource?.name
+    ).filter(Boolean);
+    const supportsCatalog = resourceNames.includes("catalog");
     if (!supportsCatalog || manifest.catalogs.length === 0) {
-      throw new Error("هذا المصدر لا يعلن عن أي كتالوج قابل للعرض.");
+      if (resourceNames.includes("subtitles")) {
+        renderAddonMessage("هذا مصدر ترجمات. ستظهر ترجماته عند فتح عنوان من أحد كتالوجات RAIF.");
+        return;
+      }
+      throw new Error("هذا المصدر لا يعلن عن كتالوج قابل للعرض أو مورد ترجمات.");
     }
 
     addonCatalogResults.replaceChildren();
@@ -452,13 +457,146 @@ async function inspectAddon(addon) {
   }
 }
 
+
 let activeHlsPlayer = null;
 let activeDashPlayer = null;
+let selectedSubtitle = null;
+
+function applySelectedSubtitle(video) {
+  video.querySelectorAll('track[data-raif-subtitle="true"]').forEach(track => track.remove());
+  if (!selectedSubtitle?.objectUrl) return;
+  const track = document.createElement("track");
+  track.kind = "subtitles";
+  track.label = selectedSubtitle.label || "ترجمة";
+  track.srclang = selectedSubtitle.language || "und";
+  track.src = selectedSubtitle.objectUrl;
+  track.default = true;
+  track.dataset.raifSubtitle = "true";
+  video.append(track);
+  track.addEventListener("load", () => {
+    for (const item of video.textTracks) item.mode = item === track.track ? "showing" : "disabled";
+  }, {once:true});
+}
+
+function setSelectedSubtitle(subtitle) {
+  if (selectedSubtitle?.objectUrl) URL.revokeObjectURL(selectedSubtitle.objectUrl);
+  selectedSubtitle = subtitle;
+  const video = document.querySelector("#raif-video");
+  if (video) applySelectedSubtitle(video);
+}
+
+function subtitleToVtt(raw) {
+  let value = String(raw || "").replace(/^\uFEFF/, "").replace(/\r/g, "").trim();
+  if (!value) throw new Error("ملف الترجمة فارغ.");
+  if (/^WEBVTT(?:\s|$)/i.test(value)) return value;
+  value = value
+    .replace(/^(\d+)\s*\n(?=\d{2}:\d{2}:\d{2}[,.])/gm, "")
+    .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2");
+  if (!/\d{2}:\d{2}:\d{2}\.\d{3}\s+-->/.test(value)) {
+    throw new Error("صيغة الترجمة غير مدعومة؛ نحتاج WebVTT أو SRT.");
+  }
+  return "WEBVTT\n\n" + value;
+}
+
+async function fetchSubtitleFile(subtitle) {
+  const url = safeHttpsUrl(subtitle.url);
+  if (!url) throw new Error("رابط الترجمة غير آمن.");
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+  try {
+    const response = await fetch(url.href, {
+      method:"GET", mode:"cors", credentials:"omit",
+      headers:{Accept:"text/vtt,text/plain,application/x-subrip,*/*"},
+      signal:controller.signal
+    });
+    if (!response.ok) throw new Error("تعذر تحميل الترجمة (HTTP " + response.status + ").");
+    const length = Number(response.headers.get("content-length") || 0);
+    if (length > 5000000) throw new Error("ملف الترجمة أكبر من الحد المسموح.");
+    const raw = await response.text();
+    if (raw.length > 5000000) throw new Error("ملف الترجمة أكبر من الحد المسموح.");
+    const vtt = subtitleToVtt(raw);
+    return URL.createObjectURL(new Blob([vtt], {type:"text/vtt;charset=utf-8"}));
+  } catch (error) {
+    if (error.name === "AbortError") throw new Error("انتهت مهلة تحميل الترجمة.");
+    if (error instanceof TypeError) throw new Error("تعذر تحميل الترجمة؛ قد يمنع الخادم الوصول عبر CORS.");
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function findSubtitles(meta, catalogEntry, area, button) {
+  area.replaceChildren();
+  button.disabled = true;
+  button.textContent = "جارٍ البحث عن الترجمات...";
+  const candidates = addons.filter(addon => addon.enabled && (
+    (Array.isArray(addon.config?.resources) && addon.config.resources.includes("subtitles")) ||
+    /subtito|subsource|subdl|submaker|opensubtitles/i.test(addon.name || "")
+  ));
+  if (!candidates.length) {
+    const note = document.createElement("p");
+    note.textContent = "لم يتم إعداد أي مصدر ترجمات بعد. أضف Subtito أو SubSource أو SubDL أو OpenSubtitles.";
+    area.append(note);
+    button.disabled = false;
+    button.textContent = "البحث عن الترجمات";
+    return;
+  }
+  const results = await Promise.allSettled(candidates.map(async addon => {
+    const endpoint = addonEndpoint(addon.manifest_url, ["subtitles", catalogEntry.type, meta.id]);
+    const data = await fetchAddonJson(endpoint.href, "الترجمات");
+    return (Array.isArray(data?.subtitles) ? data.subtitles : [])
+      .filter(entry => typeof entry?.url === "string" && safeHttpsUrl(entry.url))
+      .map(entry => ({
+        url: entry.url,
+        label: [entry.lang || entry.language || "ترجمة", addon.name].filter(Boolean).join(" · "),
+        language: /^[a-z]{2,3}(?:-[a-z0-9]+)?$/i.test(entry.langCode || "") ? entry.langCode : "und"
+      }));
+  }));
+  const subtitles = results.flatMap(result => result.status === "fulfilled" ? result.value : []);
+  if (!subtitles.length) {
+    const note = document.createElement("p");
+    note.textContent = "لم تُرجع المصادر ترجمات لهذا العنوان، أو تعذر الوصول إليها بسبب CORS.";
+    area.append(note);
+  } else {
+    subtitles.forEach((subtitle, index) => {
+      const choose = document.createElement("button");
+      choose.type = "button";
+      choose.className = "save-btn subtitle-choice";
+      choose.textContent = subtitle.label || ("ترجمة " + (index + 1));
+      choose.addEventListener("click", async () => {
+        choose.disabled = true;
+        choose.textContent = "جارٍ تحميل الترجمة...";
+        try {
+          const objectUrl = await fetchSubtitleFile(subtitle);
+          setSelectedSubtitle({objectUrl, label:subtitle.label, language:subtitle.language});
+          choose.textContent = "✓ " + (subtitle.label || "تم اختيار الترجمة");
+          area.querySelectorAll("button").forEach(item => { if (item !== choose) item.disabled = true; });
+        } catch (error) {
+          choose.disabled = false;
+          choose.textContent = "تعذر التحميل — حاول مجدداً";
+          const note = document.createElement("small");
+          note.className = "is-error";
+          note.textContent = error.message;
+          area.append(note);
+        }
+      });
+      area.append(choose);
+    });
+  }
+  button.disabled = false;
+  button.textContent = "إعادة البحث عن الترجمات";
+}
+
 function disposeStreamPlayer() {
   const video = document.querySelector("#raif-video");
   if (activeHlsPlayer) { activeHlsPlayer.destroy(); activeHlsPlayer = null; }
   if (activeDashPlayer) { activeDashPlayer.reset(); activeDashPlayer = null; }
-  if (video) { video.pause(); video.removeAttribute("src"); video.load(); }
+  if (video) {
+    video.pause();
+    video.querySelectorAll('track[data-raif-subtitle="true"]').forEach(track => track.remove());
+    video.removeAttribute("src");
+    video.load();
+  }
 }
 async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}) {
   let target;
@@ -472,12 +610,13 @@ async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}) {
   status.textContent = "جارٍ تجهيز المشغل...";
   status.classList.remove("is-error");
   disposeStreamPlayer();
+  applySelectedSubtitle(video);
   dialog.showModal();
   const mime = String(stream.behaviorHints?.mimeType || stream.mimeType || stream.type || "").toLowerCase();
   const filename = String(stream.behaviorHints?.filename || stream.filename || "");
   const mediaHint = (target.pathname + " " + filename).toLowerCase();
-  const isHls = /\\.m3u8(?:$|[?#\\s])/.test(mediaHint) || /mpegurl|vnd\\.apple\\.mpegurl/.test(mime);
-  const isDash = /\\.mpd(?:$|[?#\\s])/.test(mediaHint) || /dash\\+xml/.test(mime);
+  const isHls = /\.m3u8(?:$|[?#\s])/.test(mediaHint) || /mpegurl|vnd\.apple\.mpegurl/.test(mime);
+  const isDash = /\.mpd(?:$|[?#\s])/.test(mediaHint) || /dash\+xml/.test(mime);
   video.onerror = () => { status.textContent = "تعذر تشغيل الرابط. تأكد أن الرابط ملف وسائط مباشر، وأن الخادم يسمح بالوصول من المتصفح (CORS)."; status.classList.add("is-error"); };
   video.onplaying = () => { status.textContent = "يتم التشغيل داخل RAIF."; status.classList.remove("is-error"); };
   if (isHls && video.canPlayType("application/vnd.apple.mpegurl")) {
@@ -543,6 +682,15 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
       poster.className = "addon-detail-poster";
       content.prepend(poster);
     }
+
+    const subtitleButton = document.createElement("button");
+    subtitleButton.type = "button";
+    subtitleButton.className = "save-btn";
+    subtitleButton.textContent = "البحث عن الترجمات";
+    const subtitleArea = document.createElement("div");
+    subtitleArea.className = "addon-subtitle-list";
+    subtitleButton.addEventListener("click", () => findSubtitles(meta, catalogEntry, subtitleArea, subtitleButton));
+    content.append(subtitleButton, subtitleArea);
 
     const streamsButton = document.createElement("button");
     streamsButton.type = "button";
@@ -839,12 +987,13 @@ document.querySelector("#source-form").addEventListener("submit", async event =>
 });
 
 
-const unsupportedAddonPattern = /torrent|debrid|peerflix|p2p|jackettio|torrentio|torrin|aiostreams|cinetorrent|torrentsdb|torrentclaw|torrentfreaks|brazuca|absolute cinema|orion|meteor/i;
+const unsupportedAddonPattern = /torrent|debrid|realdebrid|peerflix|p2p|jackettio|torrentio|torrin|aiostreams|cinetorrent|torrentsdb|torrentclaw|torrentfreaks|brazuca|absolute cinema|orion|meteor|\\bRD\\b/i;
 function shouldSkipAddon(source) {
   const label = String(source?.name || "");
   let host = "";
   try { host = new URL(source?.url || "").hostname; } catch {}
-  return unsupportedAddonPattern.test(label) || /torrent|debrid|peerflix/i.test(host);
+  const rawUrl = String(source?.url || "");
+  return unsupportedAddonPattern.test(label) || /torrent|debrid|realdebrid|peerflix/i.test(host) || /realdebrid|debrid(?:=|%3d)/i.test(rawUrl);
 }
 document.querySelector("#source-import-button").addEventListener("click", async () => {
   const fileInput = document.querySelector("#source-import-file");
