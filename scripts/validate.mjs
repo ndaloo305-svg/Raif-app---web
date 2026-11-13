@@ -12,7 +12,7 @@ const dynamicIds = new Set(["toggle-save"]);
 const missing = [...new Set(selectors.filter(id => !ids.includes(id) && !dynamicIds.has(id)))];
 if (missing.length) throw new Error("JavaScript references missing HTML IDs: " + missing.join(", "));
 
-for (const required of ["auth-dialog", "source-manager", "source-form", "source-list", "detail-dialog"]) {
+for (const required of ["auth-dialog", "source-manager", "source-form", "source-list", "detail-dialog", "player-dialog", "raif-video"]) {
   if (!ids.includes(required)) throw new Error("Missing required UI element: " + required);
 }
 if (!html.includes('type="module"')) throw new Error("app.js must load as an ES module");
