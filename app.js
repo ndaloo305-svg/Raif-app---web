@@ -18,6 +18,7 @@ let activeView = "home";
 let currentUser = null;
 let savedIds = [];
 let favoritesLoading = false;
+let addons = [];
 
 const catalog = document.querySelector("#catalog");
 const search = document.querySelector("#search");
@@ -25,6 +26,7 @@ const empty = document.querySelector("#empty");
 const authDialog = document.querySelector("#auth-dialog");
 const authStatus = document.querySelector("#auth-status");
 const accountStatus = document.querySelector("#account-status");
+const sourceStatus = document.querySelector("#source-status");
 const typeNames = {movie:"فيلم",series:"مسلسل",anime:"أنمي"};
 
 function setStatus(element, message, isError = false) {
@@ -229,6 +231,124 @@ function openDetail(id) {
   document.querySelector("#detail-dialog").showModal();
 }
 
+async function loadSources() {
+  const list = document.querySelector("#source-list");
+  list.replaceChildren();
+  if (!currentUser) {
+    const message = document.createElement("p");
+    message.className = "empty-state";
+    message.textContent = "سجّل الدخول لإدارة مصادر حسابك.";
+    list.append(message);
+    return;
+  }
+
+  const { data, error } = await supabase.from("user_addons")
+    .select("id,addon_id,name,manifest_url,enabled,created_at")
+    .order("created_at", {ascending:false});
+
+  if (error) {
+    setStatus(sourceStatus, "تعذر تحميل المصادر: " + error.message, true);
+    return;
+  }
+  addons = data || [];
+  if (!addons.length) {
+    const message = document.createElement("p");
+    message.className = "empty-state";
+    message.textContent = "لم تضف أي مصادر بعد.";
+    list.append(message);
+    return;
+  }
+
+  addons.forEach(addon => {
+    const card = document.createElement("article");
+    card.className = "source-card";
+    const details = document.createElement("div");
+    details.className = "source-details";
+    const name = document.createElement("strong");
+    name.textContent = addon.name || addon.addon_id;
+    const url = document.createElement("span");
+    url.textContent = addon.manifest_url;
+    details.append(name, url);
+
+    const actions = document.createElement("div");
+    actions.className = "source-actions";
+    const toggle = document.createElement("button");
+    toggle.className = "save-btn";
+    toggle.type = "button";
+    toggle.textContent = addon.enabled ? "تعطيل" : "تفعيل";
+    toggle.addEventListener("click", () => updateSource(addon.id, {enabled:!addon.enabled}));
+    const remove = document.createElement("button");
+    remove.className = "source-remove";
+    remove.type = "button";
+    remove.textContent = "حذف";
+    remove.addEventListener("click", () => deleteSource(addon.id));
+    actions.append(toggle, remove);
+    card.append(details, actions);
+    list.append(card);
+  });
+}
+
+async function updateSource(id, changes) {
+  const { error } = await supabase.from("user_addons").update(changes).eq("id", id);
+  if (error) {
+    setStatus(sourceStatus, "تعذر تحديث المصدر: " + error.message, true);
+    return;
+  }
+  setStatus(sourceStatus, "تم تحديث حالة المصدر.");
+  await loadSources();
+}
+
+async function deleteSource(id) {
+  const { error } = await supabase.from("user_addons").delete().eq("id", id);
+  if (error) {
+    setStatus(sourceStatus, "تعذر حذف المصدر: " + error.message, true);
+    return;
+  }
+  setStatus(sourceStatus, "تم حذف المصدر من حسابك.");
+  await loadSources();
+}
+
+document.querySelector("#source-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  if (!currentUser) {
+    authDialog.showModal();
+    setStatus(authStatus, "سجّل الدخول أولاً لحفظ المصادر.");
+    return;
+  }
+
+  const nameInput = document.querySelector("#source-name");
+  const urlInput = document.querySelector("#source-url");
+  const submit = document.querySelector("#source-submit");
+  let manifest;
+  try {
+    manifest = new URL(urlInput.value.trim());
+    if (!["https:", "http:"].includes(manifest.protocol)) throw new Error("protocol");
+  } catch {
+    setStatus(sourceStatus, "أدخل رابط HTTP أو HTTPS صحيحاً.", true);
+    return;
+  }
+
+  submit.disabled = true;
+  const { error } = await supabase.from("user_addons").insert({
+    user_id: currentUser.id,
+    addon_id: "raif-web-" + crypto.randomUUID(),
+    name: nameInput.value.trim() || manifest.hostname,
+    manifest_url: manifest.toString(),
+    enabled: true,
+    config: {}
+  });
+  submit.disabled = false;
+
+  if (error) {
+    setStatus(sourceStatus, "تعذر حفظ المصدر: " + error.message, true);
+    return;
+  }
+  nameInput.value = "";
+  urlInput.value = "";
+  setStatus(sourceStatus, "تم حفظ المصدر في حسابك.");
+  await loadSources();
+});
+
 document.querySelectorAll(".filter").forEach(button => button.addEventListener("click", () => {
   activeFilter = button.dataset.filter;
   document.querySelectorAll(".filter").forEach(entry => entry.classList.toggle("active", entry === button));
@@ -249,10 +369,19 @@ document.querySelectorAll(".nav-item").forEach(button => button.addEventListener
   activeFilter = map[activeView] || "all";
   document.querySelectorAll(".nav-item").forEach(entry => entry.classList.toggle("active", entry === button));
   document.querySelectorAll(".filter").forEach(entry => entry.classList.toggle("active", entry.dataset.filter === activeFilter));
-  document.querySelector("#section-title").textContent =
-    ({home:"اكتشف المحتوى",movies:"الأفلام",series:"المسلسلات",anime:"الأنمي",library:"مكتبتي"})[activeView];
-  document.querySelector("#catalog").scrollIntoView({behavior:"smooth",block:"start"});
-  render();
+  const isSources = activeView === "sources";
+  document.querySelector("#hero").hidden = isSources;
+  document.querySelector(".content-section:not(.source-manager)").hidden = isSources;
+  document.querySelector("#source-manager").hidden = !isSources;
+  if (!isSources) {
+    document.querySelector("#section-title").textContent =
+      ({home:"اكتشف المحتوى",movies:"الأفلام",series:"المسلسلات",anime:"الأنمي",library:"مكتبتي"})[activeView];
+    render();
+  } else {
+    loadSources();
+  }
+  (isSources ? document.querySelector("#source-manager") : document.querySelector("#catalog"))
+    .scrollIntoView({behavior:"smooth",block:"start"});
 }));
 
 document.querySelector("#account-button").addEventListener("click", () => {
@@ -305,7 +434,7 @@ document.querySelector("#sign-out").addEventListener("click", async () => {
 supabase.auth.onAuthStateChange((_event, session) => {
   currentUser = session?.user || null;
   updateAuthView();
-  Promise.resolve().then(loadFavorites);
+  Promise.resolve().then(async () => { await loadFavorites(); if (activeView === "sources") await loadSources(); });
 });
 
 const { data: { session } } = await supabase.auth.getSession();
@@ -313,3 +442,4 @@ currentUser = session?.user || null;
 updateAuthView();
 await loadFavorites();
 render();
+if (activeView === "sources") await loadSources();
