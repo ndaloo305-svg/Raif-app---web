@@ -559,10 +559,16 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
       try {
         const streamUrl = addonEndpoint(addon.manifest_url, ["stream", catalogEntry.type, meta.id]);
         const streamData = await fetchAddonJson(streamUrl.href, "مصادر التشغيل");
-        const streams = Array.isArray(streamData?.streams) ? streamData.streams : [];
+        const rawStreams = Array.isArray(streamData?.streams) ? streamData.streams : [];
+        const streams = rawStreams.filter(stream => {
+          if (stream?.infoHash || stream?.externalUrl || stream?.ytId) return false;
+          if (typeof stream?.url !== "string") return false;
+          try { const url = new URL(stream.url); return ["https:", "http:"].includes(url.protocol) && !url.username && !url.password; }
+          catch { return false; }
+        });
         if (!streams.length) {
           const note = document.createElement("p");
-          note.textContent = "لم يُرجع هذا المصدر خيارات تشغيل لهذا العنوان.";
+          note.textContent = rawStreams.length ? "لم نجد روابط مباشرة قابلة للتشغيل؛ تم إخفاء التورنت والروابط التي تتطلب خدمة خارجية." : "لم يُرجع هذا المصدر خيارات تشغيل لهذا العنوان.";
           streamsArea.append(note);
         }
         streams.forEach((stream, index) => {
@@ -832,6 +838,83 @@ document.querySelector("#source-form").addEventListener("submit", async event =>
   urlInput.value = "";
   setStatus(sourceStatus, "تم حفظ المصدر في حسابك.");
   await loadSources();
+});
+
+
+const unsupportedAddonPattern = /torrent|debrid|peerflix|p2p|jackettio|torrentio|torrin|aiostreams|cinetorrent|torrentsdb|torrentclaw|torrentfreaks|brazuca|absolute cinema|orion|meteor/i;
+function shouldSkipAddon(source) {
+  const label = String(source?.name || "");
+  let host = "";
+  try { host = new URL(source?.url || "").hostname; } catch {}
+  return unsupportedAddonPattern.test(label) || /torrent|debrid|peerflix/i.test(host);
+}
+document.querySelector("#source-import-button").addEventListener("click", async () => {
+  const fileInput = document.querySelector("#source-import-file");
+  const status = document.querySelector("#source-import-status");
+  const button = document.querySelector("#source-import-button");
+  if (!currentUser) {
+    setStatus(authStatus, "سجّل الدخول أولاً لاستيراد المصادر.");
+    authDialog.showModal();
+    return;
+  }
+  const file = fileInput.files?.[0];
+  if (!file) { setStatus(status, "اختر ملف JSON أولاً.", true); return; }
+  button.disabled = true;
+  setStatus(status, "جارٍ فحص الإضافات وحفظ المتوافق منها...");
+  try {
+    const exported = JSON.parse(await file.text());
+    const sources = Array.isArray(exported) ? exported : exported?.sources;
+    if (!Array.isArray(sources)) throw new Error("صيغة الملف غير معروفة. اختر تصدير Stremio بصيغة JSON.");
+    const { data: existing, error: existingError } = await supabase
+      .from("user_addons").select("manifest_url").eq("user_id", currentUser.id);
+    if (existingError) throw new Error("تعذر قراءة المصادر الحالية.");
+    const known = new Set((existing || []).map(row => row.manifest_url));
+    const accepted = [];
+    let skipped = 0, failed = 0, duplicates = 0;
+    for (const source of sources) {
+      const rawUrl = typeof source?.url === "string" ? source.url.trim() : "";
+      let url;
+      try {
+        url = new URL(rawUrl);
+        if (url.protocol !== "https:" || url.username || url.password) throw new Error("unsafe");
+      } catch { skipped++; continue; }
+      if (shouldSkipAddon(source)) { skipped++; continue; }
+      if (known.has(url.href)) { duplicates++; continue; }
+      try {
+        const manifest = await fetchAddonJson(url.href, "Manifest");
+        if (!manifest || typeof manifest !== "object" || !manifest.id ||
+            !Array.isArray(manifest.resources)) { failed++; continue; }
+        const resources = manifest.resources.map(resource =>
+          typeof resource === "string" ? resource : resource?.name
+        ).filter(Boolean);
+        const supported = resources.some(resource =>
+          ["catalog", "stream", "subtitles", "meta"].includes(resource)
+        );
+        if (!supported) { skipped++; continue; }
+        accepted.push({
+          user_id: currentUser.id,
+          addon_id: String(manifest.id).slice(0, 255),
+          name: String(source.name || manifest.name || manifest.id).slice(0, 100),
+          manifest_url: url.href,
+          enabled: true,
+          config: {raif_imported: true, resources}
+        });
+        known.add(url.href);
+      } catch { failed++; }
+    }
+    if (accepted.length) {
+      const { error } = await supabase.from("user_addons").insert(accepted);
+      if (error) throw new Error("تعذر حفظ المصادر المتوافقة في حسابك.");
+    }
+    setStatus(status, "اكتمل الفحص: أُضيف " + accepted.length + "، استُبعد " + skipped +
+      " غير مناسب، مكرر " + duplicates + "، تعذر فحص " + failed + ".");
+    fileInput.value = "";
+    await loadSources();
+  } catch (error) {
+    setStatus(status, error.message || "تعذر استيراد الملف.", true);
+  } finally {
+    button.disabled = false;
+  }
 });
 
 document.querySelectorAll(".filter").forEach(button => button.addEventListener("click", () => {
