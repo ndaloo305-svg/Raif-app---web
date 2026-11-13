@@ -76,3 +76,14 @@
 .player-dialog .player-note{font-size:11px;color:var(--muted);line-height:1.7}
 .stream-play-btn{display:inline-block;margin-inline-start:8px}
 @media(max-width:600px){.player-dialog{padding:20px 14px}.player-dialog video{max-height:55vh}}
+
+/* Add-on branding and source icons */
+.source-identity{display:flex;align-items:center;gap:12px;min-width:0}
+.source-logo{width:48px;height:48px;flex:0 0 48px;display:grid;place-items:center;overflow:hidden;border:1px solid var(--line);border-radius:12px;background:#242630;color:var(--accent);font-weight:800;font-size:18px}
+.source-logo img{width:100%;height:100%;object-fit:contain;padding:5px;box-sizing:border-box}
+.addon-results-heading{display:flex;align-items:center;gap:14px}
+.addon-manifest-icon{width:54px;height:54px;flex:0 0 54px;object-fit:contain;border:1px solid var(--line);border-radius:13px;background:#242630;padding:5px;box-sizing:border-box}
+.addon-heading-text{min-width:0}
+.addon-heading-text h3{margin:0 0 5px}
+.addon-heading-text p{margin:0}
+.addon-stream-row .stream-play-btn{margin-top:9px}
