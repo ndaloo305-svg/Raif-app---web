@@ -33,19 +33,19 @@ python3 -m http.server 8000
 
 ## حدود النسخة الحالية
 - بيانات الأفلام والمسلسلات والأنمي المعروضة تجريبية وليست كتالوج إنتاجياً.
-- جلب Manifest والكتالوجات وتفاصيل العناوين وخيارات التشغيل يعتمد على دعم CORS لدى الإضافة. روابط التشغيل تُفتح خارج RAIF حالياً.
-- مشغل RAIF يدعم ملفات الفيديو المباشرة وHLS داخل الصفحة حسب دعم المتصفح والخادم. محرك Torrent غير مربوط.
+- جلب Manifest والكتالوجات وتفاصيل العناوين وخيارات التشغيل يعتمد على دعم CORS لدى الإضافة. روابط الفيديو المباشرة وHLS يمكن تشغيلها داخل مشغل RAIF، أو فتح الرابط خارج التطبيق.
+- مشغل RAIF يدعم ملفات الفيديو المباشرة وHLS داخل الصفحة حسب دعم المتصفح والخادم. قد تتطلب قوائم HLS وملفاتها دعم CORS. روابط HTTP قد تُمنع عند فتح الموقع عبر HTTPS. بعض المصادر التي تتطلب ترويسات مخصصة أو DRM قد لا تعمل. محرك Torrent وDASH وDRM غير مربوطين.
 - المزامنة الحالية تشمل المفضلة وروابط الإضافات؛ قوائم المشاهدة والتقدم وسجل المشاهدة لم تُربط بواجهات الموقع بعد.
-- النشر الحي يحتاج تفعيل GitHub Pages ودمج طلب السحب بعد المراجعة.
+- النشر الحي يتطلب تفعيل GitHub Pages من إعدادات المستودع واختيار GitHub Actions كمصدر للنشر.
 
 هذا المستودع منفصل عن تطبيق RAIF iOS، ويستخدم مشروع Supabase الحالي دون إنشاء مشروع جديد.
 
 
 ## Stremio catalog browsing
 
-The source manager reads enabled add-on HTTPS Manifests, lists declared catalogs, supports their extra parameters, displays metadata details, and lists stream options returned by the add-on. Stream URLs currently open outside RAIF.
+The source manager reads enabled add-on HTTPS Manifests, lists declared catalogs, supports their extra parameters, displays metadata details, and lists stream options returned by the add-on. Direct video and HLS stream URLs can be played in RAIF’s in-page player when supported by the browser and source server.
 
 - Catalog requests are made directly from the browser; the add-on server must allow cross-origin requests (CORS).
 - Only HTTPS Manifest and poster URLs are accepted.
 - Responses are limited to 1.5 MB and requests time out after 12 seconds.
-- Catalog browsing supports required and optional extra parameters declared by the add-on. Stream resolution and playback are not implemented yet.
+- Catalog browsing supports required and optional extra parameters declared by the add-on. Direct HTTP(S) video and HLS playback are implemented. Torrent, DASH, DRM, and sources requiring custom headers are not supported yet.
