@@ -987,7 +987,7 @@ document.querySelector("#source-form").addEventListener("submit", async event =>
 });
 
 
-const unsupportedAddonPattern = /torrent|debrid|realdebrid|peerflix|p2p|jackettio|torrentio|torrin|aiostreams|cinetorrent|torrentsdb|torrentclaw|torrentfreaks|brazuca|absolute cinema|orion|meteor|\\bRD\\b/i;
+const unsupportedAddonPattern = /torrent|debrid|realdebrid|peerflix|p2p|jackettio|torrentio|torrin|aiostreams|comet|one pace|cinetorrent|torrentsdb|torrentclaw|torrentfreaks|brazuca|absolute cinema|orion|meteor|\bRD\b/i;
 function shouldSkipAddon(source) {
   const label = String(source?.name || "");
   let host = "";
