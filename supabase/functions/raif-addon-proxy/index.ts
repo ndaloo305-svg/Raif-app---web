@@ -212,7 +212,15 @@ Deno.serve(async (req: Request) => {
     }
     const token = authorization.slice(7);
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
-    const publishableKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY");
+    let publishableKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || "";
+    if (!publishableKey) {
+      try {
+        const keyNames = JSON.parse(Deno.env.get("SUPABASE_PUBLISHABLE_KEYS") || "{}");
+        if (typeof keyNames.default === "string") publishableKey = Deno.env.get(keyNames.default) || "";
+      } catch {
+        // Fall through to the explicit configuration error below.
+      }
+    }
     if (!supabaseUrl || !publishableKey) {
       return jsonResponse({ error: "Supabase function configuration is incomplete." }, 500);
     }
