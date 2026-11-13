@@ -710,7 +710,7 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
         const streams = rawStreams.filter(stream => {
           if (stream?.infoHash || stream?.externalUrl || stream?.ytId || stream?.behaviorHints?.notWebReady) return false;
           if (typeof stream?.url !== "string") return false;
-          try { const url = new URL(stream.url); return url.protocol === "https:" && !url.username && !url.password && !/\\.torrent$/i.test(url.pathname); }
+          try { const url = new URL(stream.url); return url.protocol === "https:" && !url.username && !url.password && !/\.torrent$/i.test(url.pathname); }
           catch { return false; }
         });
         if (!streams.length) {
