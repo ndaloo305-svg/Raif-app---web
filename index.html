@@ -71,6 +71,14 @@
       </nav>
     </main>
   </div>
+  <dialog id="player-dialog" class="player-dialog">
+    <button class="dialog-close" id="close-player" aria-label="إغلاق المشغل">×</button>
+    <span class="eyebrow">RAIF PLAYER</span>
+    <h2 id="player-title">مشغل RAIF</h2>
+    <video id="raif-video" controls playsinline preload="metadata"></video>
+    <p id="player-status" class="auth-status" role="status">اختر مصدراً لبدء التشغيل.</p>
+    <p class="player-note">يدعم المشغل ملفات الفيديو المباشرة وHLS حسب دعم المتصفح والخادم. قد تتطلب بعض الروابط CORS أو ترويسات خاصة.</p>
+  </dialog>
   <dialog id="detail-dialog" class="detail-dialog"><button class="dialog-close" id="close-dialog" aria-label="إغلاق">×</button><div id="detail-content"></div></dialog>
   <dialog id="auth-dialog" class="detail-dialog auth-dialog">
     <button class="dialog-close" id="close-auth" aria-label="إغلاق">×</button>
