@@ -37,7 +37,7 @@ jobs:
           deno-version: v2.x
 
       - name: Type-check Supabase Edge Function
-        run: deno check supabase/functions/raif-addon-proxy/index.ts
+        run: deno check --node-modules-dir=auto supabase/functions/raif-addon-proxy/index.ts
 
   deploy:
     needs: validate
