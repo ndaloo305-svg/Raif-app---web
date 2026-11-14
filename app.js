@@ -16,6 +16,8 @@ const items = [
 let activeFilter = "all";
 let activeView = "home";
 let currentUser = null;
+let authCodeStep = false;
+let pendingAuthEmail = "";
 let savedIds = [];
 let favoritesLoading = false;
 let addons = [];
@@ -37,7 +39,8 @@ function setStatus(element, message, isError = false) {
 
 function updateAuthView() {
   const signedIn = Boolean(currentUser);
-  document.querySelector("#auth-form-view").hidden = signedIn;
+  document.querySelector("#auth-form-view").hidden = signedIn || authCodeStep;
+  document.querySelector("#auth-code-view").hidden = signedIn || !authCodeStep;
   document.querySelector("#account-view").hidden = !signedIn;
   document.querySelector("#account-button").textContent = signedIn
     ? (currentUser.email?.trim()?.[0]?.toUpperCase() || "✓")
@@ -1087,6 +1090,23 @@ authDialog.addEventListener("click", event => {
   if (event.target === authDialog) authDialog.close();
 });
 
+async function requestEmailCode(email, statusElement = authStatus) {
+  const { error } = await supabase.auth.signInWithOtp({
+    email,
+    options: {shouldCreateUser: true}
+  });
+  if (error) {
+    setStatus(statusElement, "تعذر إرسال الرمز: " + error.message, true);
+    return false;
+  }
+  pendingAuthEmail = email;
+  authCodeStep = true;
+  updateAuthView();
+  document.querySelector("#auth-code").value = "";
+  setStatus(document.querySelector("#auth-code-status"), "أرسلنا رمز التحقق إلى بريدك. أدخله هنا لإكمال الدخول.");
+  return true;
+}
+
 document.querySelector("#auth-form").addEventListener("submit", async event => {
   event.preventDefault();
   const email = document.querySelector("#auth-email").value.trim();
@@ -1094,21 +1114,56 @@ document.querySelector("#auth-form").addEventListener("submit", async event => {
   if (!email) return;
   submit.disabled = true;
   submit.textContent = "جارٍ الإرسال...";
-  setStatus(authStatus, "جارٍ إرسال رابط الدخول إلى بريدك...");
-  const redirectUrl = new URL(window.location.href);
-  redirectUrl.search = "";
-  redirectUrl.hash = "";
-  const { error } = await supabase.auth.signInWithOtp({
-    email,
-    options: {emailRedirectTo: redirectUrl.toString(), shouldCreateUser: true}
+  setStatus(authStatus, "جارٍ إرسال رمز الدخول إلى بريدك...");
+  await requestEmailCode(email);
+  submit.disabled = false;
+  submit.textContent = "إرسال رمز الدخول";
+});
+
+document.querySelector("#auth-code-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  const token = document.querySelector("#auth-code").value.trim();
+  const submit = document.querySelector("#auth-verify");
+  if (!pendingAuthEmail || !/^[0-9]{6,8}$/.test(token)) {
+    setStatus(document.querySelector("#auth-code-status"), "أدخل رمزاً صحيحاً من 6 إلى 8 أرقام.", true);
+    return;
+  }
+  submit.disabled = true;
+  submit.textContent = "جارٍ التحقق...";
+  const {data, error} = await supabase.auth.verifyOtp({
+    email: pendingAuthEmail,
+    token,
+    type: "email"
   });
   submit.disabled = false;
-  submit.textContent = "إرسال رابط الدخول";
+  submit.textContent = "تأكيد الرمز";
   if (error) {
-    setStatus(authStatus, "تعذر إرسال الرابط: " + error.message, true);
-  } else {
-    setStatus(authStatus, "أرسلنا رابط الدخول إلى بريدك. افتح الرسالة من نفس المتصفح لإكمال تسجيل الدخول.");
+    setStatus(document.querySelector("#auth-code-status"), "تعذر التحقق من الرمز: " + error.message, true);
+    return;
   }
+  currentUser = data.user || data.session?.user || null;
+  authCodeStep = false;
+  pendingAuthEmail = "";
+  updateAuthView();
+  await loadFavorites();
+  render();
+  setStatus(accountStatus, "تم تسجيل الدخول بنجاح.");
+});
+
+document.querySelector("#auth-resend").addEventListener("click", async () => {
+  const button = document.querySelector("#auth-resend");
+  if (!pendingAuthEmail) return;
+  button.disabled = true;
+  setStatus(document.querySelector("#auth-code-status"), "جارٍ إرسال رمز جديد...");
+  await requestEmailCode(pendingAuthEmail, document.querySelector("#auth-code-status"));
+  button.disabled = false;
+});
+
+document.querySelector("#auth-back").addEventListener("click", () => {
+  authCodeStep = false;
+  pendingAuthEmail = "";
+  updateAuthView();
+  setStatus(authStatus, "");
 });
 
 document.querySelector("#sign-out").addEventListener("click", async () => {
