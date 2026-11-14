@@ -1014,7 +1014,7 @@ document.querySelector("#source-import-button").addEventListener("click", async 
             addon_id: String(manifest.id).slice(0, 255),
             name: String(source.name || manifest.name || manifest.id).slice(0, 100),
             manifest_url: url.href,
-            enabled: true,
+            enabled: source.enabled !== false,
             config: {raif_imported: true, resources}
           });
         } catch { failed++; }
