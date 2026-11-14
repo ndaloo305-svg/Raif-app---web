@@ -16,8 +16,7 @@ const items = [
 let activeFilter = "all";
 let activeView = "home";
 let currentUser = null;
-let authCodeStep = false;
-let pendingAuthEmail = "";
+const SHARED_ACCOUNT_EMAIL = "raif-shared@wdgjjqwxsluumltezqlp.supabase.co";
 let savedIds = [];
 let favoritesLoading = false;
 let addons = [];
@@ -39,20 +38,17 @@ function setStatus(element, message, isError = false) {
 
 function updateAuthView() {
   const signedIn = Boolean(currentUser);
-  document.querySelector("#auth-form-view").hidden = signedIn || authCodeStep;
-  document.querySelector("#auth-code-view").hidden = signedIn || !authCodeStep;
+  document.querySelector("#auth-form-view").hidden = signedIn;
   document.querySelector("#account-view").hidden = !signedIn;
-  document.querySelector("#account-button").textContent = signedIn
-    ? (currentUser.email?.trim()?.[0]?.toUpperCase() || "✓")
-    : "N";
+  document.querySelector("#account-button").textContent = signedIn ? "✓" : "N";
   document.querySelector("#account-button").setAttribute(
     "aria-label",
-    signedIn ? "الحساب المتصل" : "تسجيل الدخول"
+    signedIn ? "حساب RAIF المشترك" : "إدخال رمز الدخول"
   );
   if (signedIn) {
-    document.querySelector("#account-email").textContent = currentUser.email || "حساب RAIF";
+    document.querySelector("#account-email").textContent = "حساب RAIF المشترك";
   }
-}
+
 
 function itemContentType(item) {
   // The existing RAIF favorites schema supports movie, series and episode.
@@ -1090,80 +1086,41 @@ authDialog.addEventListener("click", event => {
   if (event.target === authDialog) authDialog.close();
 });
 
-async function requestEmailCode(email, statusElement = authStatus) {
-  const { error } = await supabase.auth.signInWithOtp({
-    email,
-    options: {shouldCreateUser: true}
-  });
-  if (error) {
-    setStatus(statusElement, "تعذر إرسال الرمز: " + error.message, true);
-    return false;
-  }
-  pendingAuthEmail = email;
-  authCodeStep = true;
-  updateAuthView();
-  document.querySelector("#auth-code").value = "";
-  setStatus(document.querySelector("#auth-code-status"), "أرسلنا رمز التحقق إلى بريدك. أدخله هنا لإكمال الدخول.");
-  return true;
-}
-
-document.querySelector("#auth-form").addEventListener("submit", async event => {
+document.querySelector("#access-code-form").addEventListener("submit", async event => {
   event.preventDefault();
-  const email = document.querySelector("#auth-email").value.trim();
-  const submit = document.querySelector("#auth-submit");
-  if (!email) return;
-  submit.disabled = true;
-  submit.textContent = "جارٍ الإرسال...";
-  setStatus(authStatus, "جارٍ إرسال رمز الدخول إلى بريدك...");
-  await requestEmailCode(email);
-  submit.disabled = false;
-  submit.textContent = "إرسال رمز الدخول";
-});
-
-document.querySelector("#auth-code-form").addEventListener("submit", async event => {
-  event.preventDefault();
-  const token = document.querySelector("#auth-code").value.trim();
-  const submit = document.querySelector("#auth-verify");
-  if (!pendingAuthEmail || !/^[0-9]{6,8}$/.test(token)) {
-    setStatus(document.querySelector("#auth-code-status"), "أدخل رمزاً صحيحاً من 6 إلى 8 أرقام.", true);
+  const codeInput = document.querySelector("#access-code");
+  const submit = document.querySelector("#access-code-submit");
+  const code = codeInput.value.trim();
+  if (!/^\\d{3}$/.test(code)) {
+    setStatus(authStatus, "أدخل رمز الدخول المكوّن من 3 أرقام.", true);
     return;
   }
   submit.disabled = true;
   submit.textContent = "جارٍ التحقق...";
-  const {data, error} = await supabase.auth.verifyOtp({
-    email: pendingAuthEmail,
-    token,
-    type: "email"
-  });
-  submit.disabled = false;
-  submit.textContent = "تأكيد الرمز";
-  if (error) {
-    setStatus(document.querySelector("#auth-code-status"), "تعذر التحقق من الرمز: " + error.message, true);
-    return;
+  setStatus(authStatus, "جارٍ التحقق من رمز الدخول...");
+  try {
+    const { data, error } = await supabase.functions.invoke("raif-code-login", { body: { code } });
+    if (error) throw new Error(data?.error || error.message);
+    if (data?.error) throw new Error(data.error);
+    if (!data?.token_hash) throw new Error("لم تصل جلسة الدخول من الخادم.");
+    const { data: authData, error: authError } = await supabase.auth.verifyOtp({
+      token_hash: data.token_hash,
+      type: "magiclink"
+    });
+    if (authError) throw authError;
+    currentUser = authData.user || authData.session?.user || null;
+    updateAuthView();
+    await loadFavorites();
+    render();
+    if (activeView === "sources") await loadSources();
+    setStatus(accountStatus, "تم الدخول إلى حساب RAIF المشترك.");
+    authDialog.close();
+  } catch (error) {
+    setStatus(authStatus, error.message || "تعذر تسجيل الدخول.", true);
+  } finally {
+    submit.disabled = false;
+    submit.textContent = "دخول";
   }
-  currentUser = data.user || data.session?.user || null;
-  authCodeStep = false;
-  pendingAuthEmail = "";
-  updateAuthView();
-  await loadFavorites();
-  render();
-  setStatus(accountStatus, "تم تسجيل الدخول بنجاح.");
-});
-
-document.querySelector("#auth-resend").addEventListener("click", async () => {
-  const button = document.querySelector("#auth-resend");
-  if (!pendingAuthEmail) return;
-  button.disabled = true;
-  setStatus(document.querySelector("#auth-code-status"), "جارٍ إرسال رمز جديد...");
-  await requestEmailCode(pendingAuthEmail, document.querySelector("#auth-code-status"));
-  button.disabled = false;
-});
-
-document.querySelector("#auth-back").addEventListener("click", () => {
-  authCodeStep = false;
-  pendingAuthEmail = "";
-  updateAuthView();
-  setStatus(authStatus, "");
 });
 
 document.querySelector("#sign-out").addEventListener("click", async () => {
@@ -1185,7 +1142,11 @@ supabase.auth.onAuthStateChange((_event, session) => {
   Promise.resolve().then(async () => { await loadFavorites(); if (activeView === "sources") await loadSources(); });
 });
 
-const { data: { session } } = await supabase.auth.getSession();
+let { data: { session } } = await supabase.auth.getSession();
+if (session?.user?.email?.toLowerCase() !== SHARED_ACCOUNT_EMAIL) {
+  await supabase.auth.signOut({ scope: "local" });
+  session = null;
+}
 currentUser = session?.user || null;
 updateAuthView();
 await loadFavorites();
