@@ -44,7 +44,7 @@ Deno.serve(async (req: Request) => {
 
     const ip = (req.headers.get("x-real-ip") || req.headers.get("cf-connecting-ip") ||
       req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown").slice(0, 128);
-    const fingerprint = await digest(ip + "|" + (req.headers.get("user-agent") || "").slice(0, 256));
+    const fingerprint = await digest(ip);
     const admin = createClient(url, secretKey, { auth: { autoRefreshToken: false, persistSession: false } });
 
     await admin.from("raif_access_attempts").delete()
