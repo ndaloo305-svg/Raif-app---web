@@ -100,3 +100,8 @@
   max-width: 100%;
   white-space: normal;
 }
+
+.auth-code-view{direction:rtl}
+#auth-code{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:10px;background:#17181d;color:#fff;padding:14px;font:700 24px/1.2 system-ui,sans-serif;letter-spacing:8px;text-align:center;direction:ltr}
+#auth-code:focus{outline:1px solid var(--accent);border-color:var(--accent)}
+#auth-resend:disabled{opacity:.5;cursor:wait}
