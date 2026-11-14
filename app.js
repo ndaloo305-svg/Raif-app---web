@@ -48,7 +48,7 @@ function updateAuthView() {
   if (signedIn) {
     document.querySelector("#account-email").textContent = "حساب RAIF المشترك";
   }
-
+}
 
 function itemContentType(item) {
   // The existing RAIF favorites schema supports movie, series and episode.
@@ -1091,7 +1091,7 @@ document.querySelector("#access-code-form").addEventListener("submit", async eve
   const codeInput = document.querySelector("#access-code");
   const submit = document.querySelector("#access-code-submit");
   const code = codeInput.value.trim();
-  if (!/^\\d{3}$/.test(code)) {
+  if (!/^\d{3}$/.test(code)) {
     setStatus(authStatus, "أدخل رمز الدخول المكوّن من 3 أرقام.", true);
     return;
   }
