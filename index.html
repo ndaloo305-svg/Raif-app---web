@@ -98,6 +98,19 @@
       </form>
       <p class="auth-status" id="auth-status" role="status"></p>
     </section>
+    <section id="auth-code-view" hidden>
+      <span class="eyebrow">EMAIL VERIFICATION</span>
+      <h2>أدخل رمز الدخول</h2>
+      <p>أدخل الرمز الذي وصلك في رسالة البريد الإلكتروني.</p>
+      <form id="auth-code-form">
+        <label class="auth-label" for="auth-code">رمز التحقق</label>
+        <input id="auth-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="8" pattern="[0-9]{6,8}" placeholder="000000" required>
+        <button class="primary-btn auth-submit" id="auth-verify" type="submit">تأكيد الرمز</button>
+      </form>
+      <button class="save-btn" id="auth-resend" type="button">إرسال رمز جديد</button>
+      <button class="save-btn" id="auth-back" type="button">تغيير البريد الإلكتروني</button>
+      <p class="auth-status" id="auth-code-status" role="status"></p>
+    </section>
     <section id="account-view" hidden>
       <span class="eyebrow">RAIF ACCOUNT</span>
       <h2>حسابك متصل</h2>
