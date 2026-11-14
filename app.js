@@ -368,6 +368,9 @@ async function inspectAddon(addon) {
         !Array.isArray(manifest.resources) || !Array.isArray(manifest.catalogs)) {
       throw new Error("ملف Manifest لا يطابق بنية إضافة Stremio المتوقعة.");
     }
+    if (manifestHasUnsupportedDelivery(manifest)) {
+      throw new Error("استُبعد المصدر لأنه يعلن عن Torrent أو Debrid أو P2P.");
+    }
     const resourceNames = manifest.resources.map(resource =>
       typeof resource === "string" ? resource : resource?.name
     ).filter(Boolean);
@@ -660,6 +663,8 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
         const streamData = await fetchAddonResource(addon, "stream", catalogEntry.type, meta.id);
         const rawStreams = Array.isArray(streamData?.streams) ? streamData.streams : [];
         const streams = rawStreams.filter(stream => {
+          const streamLabel = [stream?.name, stream?.title, stream?.description].filter(Boolean).join(" ");
+          if (/\b(?:torrent|debrid|real[- ]?debrid|peer[- ]?to[- ]?peer|p2p)\b/i.test(streamLabel)) return false;
           if (stream?.infoHash || stream?.externalUrl || stream?.ytId || stream?.behaviorHints?.notWebReady) return false;
           if (typeof stream?.url !== "string") return false;
           try { const url = new URL(stream.url); return url.protocol === "https:" && !url.username && !url.password && !/\.torrent$/i.test(url.pathname); }
@@ -947,6 +952,14 @@ function shouldSkipAddon(source) {
   const rawUrl = String(source?.url || "");
   return unsupportedAddonPattern.test(label) || /torrent|debrid|realdebrid|peerflix/i.test(host) || /realdebrid|debrid(?:=|%3d)/i.test(rawUrl);
 }
+
+function manifestHasUnsupportedDelivery(manifest) {
+  if (manifest?.behaviorHints?.p2p === true) return true;
+  const identity = [manifest?.name, manifest?.id].filter(Boolean).join(" ");
+  if (unsupportedAddonPattern.test(identity)) return true;
+  const description = String(manifest?.description || "").replace(/\b(?:no|without|not using|does not use|doesn\x27t use)\s+(?:any\s+)?(?:torrents?|debrid|p2p)\b/gi, "");
+  return /\b(?:torrents?|real[- ]?debrid|debrid|peer[- ]?to[- ]?peer|p2p)\b/i.test(description);
+}
 document.querySelector("#source-import-button").addEventListener("click", async () => {
   const fileInput = document.querySelector("#source-import-file");
   const status = document.querySelector("#source-import-status");
@@ -988,6 +1001,7 @@ document.querySelector("#source-import-button").addEventListener("click", async 
           const manifest = await fetchAddonManifestByUrl(url.href);
           if (!manifest || typeof manifest !== "object" || !manifest.id ||
               !Array.isArray(manifest.resources)) { failed++; continue; }
+          if (manifestHasUnsupportedDelivery(manifest)) { skipped++; continue; }
           const resources = manifest.resources.map(resource =>
             typeof resource === "string" ? resource : resource?.name
           ).filter(Boolean);
