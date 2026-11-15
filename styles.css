@@ -117,3 +117,20 @@
 .catalog-diagnostics summary{cursor:pointer;color:#e2b47a}
 .catalog-diagnostics p{margin:7px 0;overflow-wrap:anywhere}
 .addon-card-poster{display:block;width:100%;aspect-ratio:2/3;object-fit:cover;background:#20232b}
+
+/* RAIF discovery and tracking UI */
+.catalog-grid{grid-template-columns:repeat(6,minmax(0,1fr));gap:20px 16px}
+.media-card{transition:transform .18s ease}.media-card:hover{transform:translateY(-3px)}
+.poster{aspect-ratio:2/3;padding:0;border-radius:12px;overflow:hidden;position:relative;background:linear-gradient(145deg,#292d38,#15171d)}
+.poster>img{width:100%;height:100%;display:block;object-fit:cover;transition:transform .35s ease}
+.media-card:hover .poster>img{transform:scale(1.045)}
+.poster:before{content:"";position:absolute;z-index:1;inset:35% 0 0;background:linear-gradient(0deg,#08090df0,transparent);pointer-events:none}
+.poster-badges{position:absolute;z-index:2;inset:9px 8px auto;display:flex;flex-wrap:wrap;gap:5px}
+.poster-badges span{padding:4px 7px;border-radius:5px;background:#0d0e12d9;color:#f3f3f5;font-size:10px;line-height:1.3}
+.poster-badges .poster-saved{background:#c5a36a;color:#171717;font-weight:700}.poster-badges .poster-watched{background:#315d48;color:#e8fff0}
+.detail-actions{display:flex;flex-wrap:wrap;gap:9px;margin:18px 0 8px}.detail-actions .save-btn{margin:0}
+#toggle-watched{border-color:#456a54;background:#1e3027;color:#b9e8c9}
+@media(max-width:1250px){.catalog-grid{grid-template-columns:repeat(5,minmax(0,1fr))}}
+@media(max-width:1000px){.catalog-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(max-width:760px){.catalog-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:17px 11px}.poster{border-radius:9px}.media-title{font-size:12px}.media-meta{font-size:10px}.mobile-nav{justify-content:flex-start;overflow-x:auto;scrollbar-width:none}.mobile-nav::-webkit-scrollbar{display:none}.mobile-nav .nav-item{flex:0 0 62px}.mobile-nav .nav-item small{font-size:9px}}
+@media(max-width:420px){.catalog-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:15px 8px}}

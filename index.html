@@ -9,8 +9,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=20261116b">
-  <script type="module" src="./app.js?v=20261116b"></script>
+  <link rel="stylesheet" href="./styles.css?v=20261116c">
+  <script type="module" src="./app.js?v=20261116c"></script>
 </head>
 <body>
   <div class="app-shell">
@@ -21,7 +21,9 @@
         <button class="nav-item" data-view="movies"><span>▣</span> الأفلام</button>
         <button class="nav-item" data-view="series"><span>▤</span> المسلسلات</button>
         <button class="nav-item" data-view="anime"><span>✦</span> الأنمي</button>
-        <button class="nav-item" data-view="library"><span>▧</span> مكتبتي</button>
+        <button class="nav-item" data-view="library"><span>▧</span> قائمتي</button>
+        <button class="nav-item" data-view="watched"><span>✓</span> شاهدتها</button>
+        <button class="nav-item" data-view="progress"><span>◷</span> التقدم</button>
         <button class="nav-item" data-view="sources"><span>⌘</span> مصادري</button>
       </nav>
       <div class="sidebar-bottom"><span class="status-dot"></span> نسخة قيد التطوير — المصادر عبر الإضافات</div>
@@ -36,13 +38,13 @@
         <div class="hero-copy">
           <span class="eyebrow">اكتشف عالمك</span>
           <h1>كل ما تحب،<br><em>في مكان واحد.</em></h1>
-          <p>تجربة مشاهدة موحّدة لاكتشاف مكتبتك ومصادرك المفضلة.</p>
+          <p>اكتشف الجديد، ابنِ قائمة مشاهدتك، وتابع تقدمك في المسلسلات من مكان واحد.</p>
           <button class="primary-btn" id="explore">استكشف المكتبة <span>←</span></button>
         </div>
         <div class="hero-art" aria-hidden="true"><div class="orb orb-one"></div><div class="orb orb-two"></div><div class="art-letter">R</div></div>
       </section>
       <section class="content-section">
-        <div class="section-heading"><div><span class="eyebrow">كتالوج موحّد من إضافاتك</span><h2 id="section-title">اكتشف المحتوى</h2></div><div class="filters" id="filters"><button class="filter active" data-filter="all">الكل</button><button class="filter" data-filter="movie">أفلام</button><button class="filter" data-filter="series">مسلسلات</button><button class="filter" data-filter="anime">أنمي</button></div></div>
+        <div class="section-heading"><div><span class="eyebrow">اكتشاف من جميع مصادرك</span><h2 id="section-title">اكتشف المحتوى</h2></div><div class="filters" id="filters"><button class="filter active" data-filter="all">الكل</button><button class="filter" data-filter="movie">أفلام</button><button class="filter" data-filter="series">مسلسلات</button><button class="filter" data-filter="anime">أنمي</button></div></div>
         <div class="catalog-toolbar"><span id="catalog-count" aria-live="polite"></span><button class="save-btn" id="refresh-catalog" type="button">تحديث الكتالوج</button></div>
         <div class="catalog-grid" id="catalog" aria-live="polite"></div>
         <div id="catalog-diagnostics" class="catalog-diagnostics" aria-live="polite"></div>
@@ -66,13 +68,15 @@
         <div id="source-list" class="source-list" aria-live="polite"></div>
         <section id="source-catalog-results" class="addon-catalog-results" aria-live="polite"></section>
       </section>
-      <footer><span>RAIF</span><span>واجهة أولية قيد التطوير</span></footer>
+      <footer><span>RAIF</span><span>اكتشف وتابع ما تشاهده</span></footer>
       <nav class="mobile-nav" aria-label="التنقل على الجوال">
         <button class="nav-item active" data-view="home"><span>⌂</span><small>الرئيسية</small></button>
         <button class="nav-item" data-view="movies"><span>▣</span><small>الأفلام</small></button>
         <button class="nav-item" data-view="series"><span>▤</span><small>المسلسلات</small></button>
         <button class="nav-item" data-view="anime"><span>✦</span><small>الأنمي</small></button>
-        <button class="nav-item" data-view="library"><span>▧</span><small>مكتبتي</small></button>
+        <button class="nav-item" data-view="library"><span>▧</span><small>قائمتي</small></button>
+        <button class="nav-item" data-view="watched"><span>✓</span><small>شاهدتها</small></button>
+        <button class="nav-item" data-view="progress"><span>◷</span><small>التقدم</small></button>
         <button class="nav-item" data-view="sources"><span>⌘</span><small>مصادري</small></button>
       </nav>
     </main>

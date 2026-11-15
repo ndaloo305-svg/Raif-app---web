@@ -11,7 +11,16 @@ let activeView = "home";
 let currentUser = null;
 const SHARED_ACCOUNT_EMAIL = "raif-shared@puhipyjljmbvczijtzkb.supabase.co";
 let savedIds = [];
+let watchedRecords = [];
 let favoritesLoading = false;
+function watchHistoryKey(){return currentUser ? "raif-watch-history-v1:"+currentUser.id : null;}
+function loadWatchHistory(){watchedRecords=[];const key=watchHistoryKey();if(!key)return;try{const v=JSON.parse(localStorage.getItem(key)||"[]");if(Array.isArray(v))watchedRecords=v.filter(x=>x&&typeof x.identity==="string");}catch{}}
+function saveWatchHistory(){const key=watchHistoryKey();if(key)try{localStorage.setItem(key,JSON.stringify(watchedRecords));}catch(e){console.warn("RAIF history save failed",e);}}
+function isTitleWatched(item){return watchedRecords.some(x=>x.identity===item.identity&&!x.episodeId);}
+function isEpisodeWatched(identity,id){return watchedRecords.some(x=>x.identity===identity&&x.episodeId===String(id));}
+function getEpisodeWatchCount(identity){return new Set(watchedRecords.filter(x=>x.identity===identity&&x.episodeId).map(x=>x.episodeId)).size;}
+function toggleTitleWatched(item){if(!currentUser){authDialog.showModal();setStatus(authStatus,"سجّل الدخول لتسجيل المشاهدة.");return;}if(isTitleWatched(item))watchedRecords=watchedRecords.filter(x=>!(x.identity===item.identity&&!x.episodeId));else watchedRecords.push({identity:item.identity,title:item.title,type:item.type,year:item.year,watchedAt:new Date().toISOString()});saveWatchHistory();render();}
+function markEpisodeWatched(item,episode){if(!currentUser){authDialog.showModal();setStatus(authStatus,"سجّل الدخول لتسجيل تقدم الحلقات.");return;}const id=String(episode?.id||"");if(id&&!isEpisodeWatched(item.identity,id))watchedRecords.push({identity:item.identity,title:item.title,type:item.type,year:item.year,episodeId:id,episodeTitle:episode.title||"",season:episode.season??null,episode:episode.episode??null,watchedAt:new Date().toISOString()});saveWatchHistory();render();}
 let addons = [];
 let addonCatalogItems = [];
 let addonCatalogLoading = false;
@@ -120,30 +129,37 @@ function mergeCatalogMeta(addon, entry, meta) {
 }
 
 function render() {
-  const q = normalizeTitle(search.value);
-  const filtered = activeView === "library" ? [] : addonCatalogItems.filter(item => (activeFilter === "all" || item.type === activeFilter || (activeFilter === "series" && item.type === "anime")) && (!q || normalizeTitle([item.title,item.genre,item.year].join(" ")).includes(q)));
+  const q=normalizeTitle(search.value);
+  let filtered=addonCatalogItems.filter(item=>(activeFilter==="all"||item.type===activeFilter||(activeFilter==="series"&&item.type==="anime"))&&(!q||normalizeTitle([item.title,item.genre,item.year].join(" ")).includes(q)));
+  if(activeView==="library")filtered=filtered.filter(item=>savedIds.includes(item.identity));
+  if(activeView==="watched")filtered=filtered.filter(item=>isTitleWatched(item));
+  if(activeView==="progress")filtered=filtered.filter(item=>item.type!=="movie"&&getEpisodeWatchCount(item.identity)>0);
   catalog.replaceChildren();
-  filtered.forEach(item => {
-    const card = document.createElement("article"); card.className = "media-card"; card.tabIndex = 0; card.setAttribute("role","button"); card.setAttribute("aria-label","تفاصيل " + item.title);
-    const posterUrl = safeAddonAssetUrl(item.poster, item.addon.manifest_url);
-    if (posterUrl) { const poster = document.createElement("img"); poster.className = "poster addon-card-poster"; poster.src = posterUrl.href; poster.alt = ""; poster.loading = "lazy"; poster.referrerPolicy = "no-referrer"; card.append(poster); }
-    else { const poster = document.createElement("div"); poster.className = "poster"; const art = document.createElement("span"); art.className = "poster-art"; art.textContent = "RAIF"; poster.append(art); card.append(poster); }
-    const label = document.createElement("span"); label.className = "poster-label"; label.textContent = [typeNames[item.type] || item.type,item.year].filter(Boolean).join(" · ");
-    const title = document.createElement("div"); title.className = "media-title"; title.textContent = item.title || "عنوان بدون اسم";
-    const detail = document.createElement("div"); detail.className = "media-meta"; detail.textContent = [item.genre,item.providers.length + " مصدر"].filter(Boolean).join(" · ");
-    card.append(label,title,detail); card.addEventListener("click",() => openAddonMeta(item.addon,item.catalogEntry,item.meta,item.providers));
-    card.addEventListener("keydown",event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); card.click(); } }); catalog.append(card);
+  filtered.forEach(item=>{
+    const card=document.createElement("article");card.className="media-card";card.tabIndex=0;card.setAttribute("role","button");card.setAttribute("aria-label","تفاصيل "+item.title);
+    const poster=document.createElement("div");poster.className="poster";
+    const url=safeAddonAssetUrl(item.poster,item.addon.manifest_url);
+    if(url){const img=document.createElement("img");img.src=url.href;img.alt="";img.loading="lazy";img.decoding="async";img.referrerPolicy="no-referrer";img.onerror=()=>img.remove();poster.append(img);}
+    else{const art=document.createElement("span");art.className="poster-art";art.textContent="RAIF";poster.append(art);}
+    const badges=document.createElement("div");badges.className="poster-badges";
+    const type=document.createElement("span");type.textContent=typeNames[item.type]||item.type;badges.append(type);
+    if(savedIds.includes(item.identity)){const b=document.createElement("span");b.className="poster-saved";b.textContent="＋ قائمتي";badges.append(b);}
+    if(isTitleWatched(item)){const b=document.createElement("span");b.className="poster-watched";b.textContent="✓ شاهدته";badges.append(b);}
+    poster.append(badges);
+    const title=document.createElement("div");title.className="media-title";title.textContent=item.title||"عنوان بدون اسم";
+    const progress=getEpisodeWatchCount(item.identity);
+    const meta=document.createElement("div");meta.className="media-meta";meta.textContent=[item.year,item.genre,item.providers.length+" مصدر",progress?progress+" حلقة مشاهدة":""].filter(Boolean).join(" · ");
+    card.append(poster,title,meta);card.addEventListener("click",()=>openAddonMeta(item.addon,item.catalogEntry,item.meta,item.providers));
+    card.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();card.click();}});catalog.append(card);
   });
-  const count = document.querySelector("#catalog-count"); if (count) count.textContent = filtered.length.toLocaleString("ar") + " عنوان موحّد · " + filtered.reduce((sum,item) => sum + item.providers.length,0).toLocaleString("ar") + " نتائج مصادر";
-  if (activeView === "library" && !currentUser) empty.textContent = "سجّل الدخول أولاً لعرض مكتبتك المحفوظة.";
-  else if (activeView === "library") empty.textContent = "المكتبة المحفوظة ستظهر هنا بعد ربط حفظ عناوين الإضافات.";
-  else if (!currentUser) empty.textContent = "سجّل الدخول أولاً لتحميل كتالوجات مصادرك.";
-  else if (addonCatalogLoading && !filtered.length) empty.textContent = "جارٍ تحميل الكتالوجات من مصادرك… ستظهر النتائج تباعاً.";
-  else if (!filtered.length && addonDiscoveryErrors.length) empty.textContent = "لم تصل عناوين. تعذّر تحميل " + addonDiscoveryErrors.length + " طلباً. افتح مصادري لمعرفة التفاصيل.";
-  else if (!filtered.length) empty.textContent = "لا توجد عناوين من المصادر المفعّلة لهذا القسم.";
-  else empty.textContent = "";
-  empty.hidden = filtered.length > 0;
-  renderDiscoveryDiagnostics();
+  const count=document.querySelector("#catalog-count");if(count)count.textContent=filtered.length.toLocaleString("ar")+" عنوان · "+filtered.reduce((n,x)=>n+x.providers.length,0).toLocaleString("ar")+" نتائج مصادر";
+  const messages={library:currentUser?"قائمتك فارغة حالياً. أضف العناوين من صفحة التفاصيل.":"سجّل الدخول لعرض قائمتك.",watched:currentUser?"لم تسجّل أي عنوان كمشاهد حتى الآن.":"سجّل الدخول لعرض سجل المشاهدة.",progress:currentUser?"لا يوجد تقدم مسجل للحلقات حتى الآن.":"سجّل الدخول لمتابعة تقدم المسلسلات."};
+  if(messages[activeView])empty.textContent=messages[activeView];
+  else if(!currentUser)empty.textContent="سجّل الدخول أولاً لتحميل كتالوجات مصادرك.";
+  else if(addonCatalogLoading&&!filtered.length)empty.textContent="جارٍ تحميل الكتالوجات من مصادرك… ستظهر النتائج تباعاً.";
+  else if(!filtered.length&&addonDiscoveryErrors.length)empty.textContent="لم تصل عناوين. تعذّر تحميل "+addonDiscoveryErrors.length+" طلباً. افتح مصادري لمعرفة التفاصيل.";
+  else if(!filtered.length)empty.textContent="لا توجد عناوين في هذا القسم من مصادرك المفعّلة.";
+  empty.hidden=filtered.length>0;renderDiscoveryDiagnostics();
 }
 
 async function loadFavorites() {
@@ -167,9 +183,7 @@ async function loadFavorites() {
     return;
   }
 
-  savedIds = (data || [])
-    .map(row => Number(row.metadata?.demo_id))
-    .filter(id => Number.isInteger(id) && items.some(item => item.id === id));
+  savedIds = (data || []).map(row => String(row.content_id || "")).filter(Boolean);
 
   await migrateLocalFavorites();
   render();
@@ -194,11 +208,12 @@ async function migrateLocalFavorites() {
       content_id: `demo-${item.id}`,
       content_type: itemContentType(item),
       metadata: {
-        demo_id: item.id,
+        identity: item.identity,
         title: item.title,
         year: item.year,
         genre: item.genre,
-        catalog_type: item.type
+        catalog_type: item.type,
+        poster: item.poster || ""
       }
     };
   });
@@ -223,31 +238,32 @@ async function toggleFavorite(item) {
 
   const button = document.querySelector("#toggle-save");
   if (button) button.disabled = true;
-  const contentId = `demo-${item.id}`;
+  const contentId = item.identity;
   const contentType = itemContentType(item);
   let error;
 
-  if (savedIds.includes(item.id)) {
+  if (savedIds.includes(item.identity)) {
     ({ error } = await supabase.from("favorites")
       .delete()
       .eq("user_id", currentUser.id)
       .eq("content_id", contentId)
       .eq("content_type", contentType));
-    if (!error) savedIds = savedIds.filter(id => id !== item.id);
+    if (!error) savedIds = savedIds.filter(id => id !== item.identity);
   } else {
     ({ error } = await supabase.from("favorites").insert({
       user_id: currentUser.id,
       content_id: contentId,
       content_type: contentType,
       metadata: {
-        demo_id: item.id,
+        identity: item.identity,
         title: item.title,
         year: item.year,
         genre: item.genre,
-        catalog_type: item.type
+        catalog_type: item.type,
+        poster: item.poster || ""
       }
     }));
-    if (!error) savedIds = [...savedIds, item.id];
+    if (!error) savedIds = [...savedIds, item.identity];
   }
 
   if (error) {
@@ -258,7 +274,7 @@ async function toggleFavorite(item) {
 
   setStatus(accountStatus, "تم تحديث مكتبتك ومزامنتها مع RAIF.");
   if (button) {
-    button.textContent = savedIds.includes(item.id) ? "إزالة من مكتبتي" : "＋ أضف إلى مكتبتي";
+    button.textContent = savedIds.includes(item.identity) ? "إزالة من قائمتي" : "＋ أضف إلى قائمتي";
     button.disabled = false;
   }
   if (activeView === "library") render();
@@ -757,9 +773,17 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta, providers = [{add
     const meta = result?.meta || catalogMeta;
     summary.textContent = meta.description || "لا توجد تفاصيل إضافية لهذا العنوان.";
     const facts = document.createElement("p");
-    facts.textContent = [meta.year, meta.runtime, ...(Array.isArray(meta.genres) ? meta.genres : [])]
-      .filter(Boolean).join(" · ");
+    facts.textContent = [meta.year,meta.runtime,...(Array.isArray(meta.genres)?meta.genres:[])].filter(Boolean).join(" · ");
     content.append(facts);
+    const trackedItem=addonCatalogItems.find(x=>x.identity===catalogIdentity(catalogEntry.type,catalogMeta))||{identity:catalogIdentity(catalogEntry.type,catalogMeta),title:meta.name||catalogMeta.name||"عنوان",type:catalogEntry.type,year:meta.year||catalogMeta.year||"",poster:meta.poster||""};
+    const actions=document.createElement("div");actions.className="detail-actions";
+    const watchlistButton=document.createElement("button");watchlistButton.type="button";watchlistButton.className="save-btn";watchlistButton.id="toggle-save";
+    const updateWatchlistLabel=()=>{watchlistButton.textContent=savedIds.includes(trackedItem.identity)?"✓ إزالة من قائمتي":"＋ أضف إلى قائمتي";};
+    updateWatchlistLabel();watchlistButton.addEventListener("click",async()=>{await toggleFavorite(trackedItem);updateWatchlistLabel();});
+    const watchedButton=document.createElement("button");watchedButton.type="button";watchedButton.className="save-btn";watchedButton.id="toggle-watched";
+    const updateWatchedLabel=()=>{watchedButton.textContent=isTitleWatched(trackedItem)?"✓ تمت المشاهدة — إلغاء":"✓ سجّل كمشاهد";};
+    updateWatchedLabel();watchedButton.addEventListener("click",()=>{toggleTitleWatched(trackedItem);updateWatchedLabel();});
+    actions.append(watchlistButton,watchedButton);content.append(actions);
     const sourceInfo = document.createElement("p");
     sourceInfo.className = "detail-note";
     sourceInfo.textContent = "المصادر التي وفّرت هذا العنوان: " + [...new Set(providers.map(source => source.addon.name || source.addon.addon_id))].join("، ");
@@ -794,13 +818,17 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta, providers = [{add
         ].filter(Boolean).join(" · ");
         episodeSelect.append(option);
       });
-      episodeSelect.value = selectedVideoId || "";
-      episodeSelect.addEventListener("change", () => {
-        selectedVideoId = episodeSelect.value || null;
-        streamsArea.replaceChildren();
-        streamsButton.textContent = "عرض مصادر تشغيل الحلقة";
-      });
-      content.append(episodeLabel, episodeSelect);
+      episodeSelect.value=selectedVideoId||"";
+      const episodeTrackButton=document.createElement("button");episodeTrackButton.type="button";episodeTrackButton.className="save-btn";
+      const selectedEpisode=()=>meta.videos.find(video=>String(video.id)===String(selectedVideoId));
+      const updateEpisodeLabel=()=>{const ep=selectedEpisode();episodeTrackButton.textContent=ep&&isEpisodeWatched(trackedItem.identity,ep.id)?"✓ الحلقة مسجلة كمشاهدة":"تسجيل مشاهدة هذه الحلقة";};
+      updateEpisodeLabel();
+      episodeSelect.addEventListener("change",()=>{selectedVideoId=episodeSelect.value||null;streamsArea.replaceChildren();streamsButton.textContent="عرض مصادر تشغيل الحلقة";updateEpisodeLabel();});
+      episodeTrackButton.addEventListener("click",()=>{const ep=selectedEpisode();if(ep){markEpisodeWatched(trackedItem,ep);updateEpisodeLabel();}});
+      const progressNote=document.createElement("p");progressNote.className="detail-note";
+      const updateProgressNote=()=>{progressNote.textContent="تقدمك: "+getEpisodeWatchCount(trackedItem.identity).toLocaleString("ar")+" من "+meta.videos.length.toLocaleString("ar")+" حلقة مسجلة كمشاهدة.";};
+      updateProgressNote();episodeTrackButton.addEventListener("click",updateProgressNote);
+      content.append(episodeLabel,episodeSelect,episodeTrackButton,progressNote);
     }
 
     const subtitleButton = document.createElement("button");
@@ -1269,19 +1297,19 @@ document.querySelector("#explore").addEventListener("click", () => {
 });
 document.querySelectorAll(".nav-item").forEach(button => button.addEventListener("click", () => {
   activeView = button.dataset.view;
-  const map = {home:"all",movies:"movie",series:"series",anime:"anime",library:"all"};
+  const map = {home:"all",movies:"movie",series:"series",anime:"anime",library:"all",watched:"all",progress:"all"};
   activeFilter = map[activeView] || "all";
   document.querySelectorAll(".nav-item").forEach(entry => entry.classList.toggle("active", entry === button));
   document.querySelectorAll(".filter").forEach(entry => entry.classList.toggle("active", entry.dataset.filter === activeFilter));
   const isSources = activeView === "sources";
-  document.querySelector("#hero").hidden = isSources;
+  document.querySelector("#hero").hidden = isSources || activeView !== "home";
   document.querySelector(".content-section:not(.source-manager)").hidden = isSources;
   document.querySelector("#source-manager").hidden = !isSources;
   if (!isSources) {
     document.querySelector("#section-title").textContent =
-      ({home:"اكتشف المحتوى",movies:"الأفلام",series:"المسلسلات",anime:"الأنمي",library:"مكتبتي"})[activeView];
+      ({home:"اكتشف المحتوى",movies:"الأفلام",series:"المسلسلات",anime:"الأنمي",library:"قائمتي",watched:"سجل المشاهدة",progress:"تقدم المسلسلات"})[activeView];
     render();
-    if (activeView !== "library") loadAddonDiscovery(activeView);
+    if (["home","movies","series","anime"].includes(activeView)) loadAddonDiscovery(activeView);
   } else {
     loadSources();
   }
@@ -1324,9 +1352,10 @@ document.querySelector("#access-code-form").addEventListener("submit", async eve
     currentUser = authData.user || authData.session?.user || null;
     updateAuthView();
     await loadFavorites();
+    loadWatchHistory();
     await loadSources();
     render();
-    if (activeView !== "library" && activeView !== "sources") void loadAddonDiscovery(activeView);
+    if (["home","movies","series","anime"].includes(activeView)) void loadAddonDiscovery(activeView);
     setStatus(accountStatus, "تم الدخول إلى حساب RAIF المشترك.");
     authDialog.close();
   } catch (error) {
@@ -1345,6 +1374,7 @@ document.querySelector("#sign-out").addEventListener("click", async () => {
   }
   currentUser = null;
   savedIds = [];
+  watchedRecords = [];
   updateAuthView();
   render();
   setStatus(authStatus, "تم تسجيل الخروج.");
@@ -1353,6 +1383,7 @@ document.querySelector("#sign-out").addEventListener("click", async () => {
 supabase.auth.onAuthStateChange((_event, session) => {
   currentUser = session?.user || null;
   updateAuthView();
+  loadWatchHistory();
   Promise.resolve().then(async () => { await loadFavorites(); if (activeView === "sources") await loadSources(); });
 });
 
@@ -1364,6 +1395,7 @@ if (session?.user?.email?.toLowerCase() !== SHARED_ACCOUNT_EMAIL) {
 currentUser = session?.user || null;
 updateAuthView();
 await loadFavorites();
+loadWatchHistory();
 await loadSources();
 render();
-if (activeView !== "library" && activeView !== "sources") void loadAddonDiscovery(activeView);
+if (["home","movies","series","anime"].includes(activeView)) void loadAddonDiscovery(activeView);
