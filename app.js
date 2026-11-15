@@ -19,6 +19,13 @@ const addonDiscoveryCache = new Set();
 const addonManifestCache = new Map();
 const addonLoadErrors = new Map();
 
+function resetAddonDiscovery() {
+  addonCatalogItems = [];
+  addonDiscoveryCache.clear();
+  addonManifestCache.clear();
+  addonLoadErrors.clear();
+}
+
 const catalog = document.querySelector("#catalog");
 const search = document.querySelector("#search");
 const empty = document.querySelector("#empty");
@@ -336,6 +343,25 @@ async function loadSources() {
     const url = document.createElement("span");
     url.textContent = addon.manifest_url;
     details.append(name, url);
+    const manifest = addonManifestCache.get(addon.id);
+    const resources = Array.isArray(manifest?.resources)
+      ? manifest.resources.map(resource => typeof resource === "string" ? resource : resource?.name).filter(Boolean)
+      : (Array.isArray(addon.config?.resources) ? addon.config.resources : []);
+    const capabilities = document.createElement("small");
+    capabilities.className = "source-capabilities";
+    capabilities.textContent = resources.length
+      ? ["catalog","stream","subtitles","meta"].filter(resource => resources.includes(resource)).map(resource => ({
+          catalog:"كتالوج",stream:"تشغيل",subtitles:"ترجمة",meta:"تفاصيل"
+        })[resource]).join(" · ")
+      : "لم يُفحص Manifest بعد";
+    details.append(capabilities);
+    const loadError = [...addonLoadErrors.values()].find(entry => entry.name === (addon.name || addon.addon_id));
+    if (loadError) {
+      const errorNote = document.createElement("small");
+      errorNote.className = "is-error";
+      errorNote.textContent = "آخر خطأ: " + loadError.message;
+      details.append(errorNote);
+    }
     identity.append(details);
 
     const actions = document.createElement("div");
@@ -466,7 +492,12 @@ async function loadAddonDiscovery(view = activeView) {
         await withAddonTimeout(fetchAddonResource(addon, "manifest"), "Manifest · " + (addon.name || addon.addon_id));
       addonManifestCache.set(addon.id, manifest);
       const catalogs = Array.isArray(manifest?.catalogs) ? manifest.catalogs : [];
-      const entries = catalogs.filter(entry => entry?.id && wanted.includes(entry.type));
+      const entries = catalogs.filter(entry => {
+        if (!entry?.id || !wanted.includes(entry.type)) return false;
+        const label = String(entry.id + " " + (entry.name || "")).toLowerCase();
+        if (view === "anime") return entry.type === "anime" || /anime|animation|cartoon/.test(label);
+        return true;
+      });
       if (!entries.length) return;
 
       await Promise.all(entries.map(async entry => {
@@ -481,7 +512,8 @@ async function loadAddonDiscovery(view = activeView) {
           const metas = Array.isArray(data?.metas) ? data.metas : [];
           metas.forEach(meta => {
             if (!meta || !meta.id) return;
-            const type = entry.type === "anime" ? "anime" : entry.type;
+            const catalogLabel = String(entry.id + " " + (entry.name || "")).toLowerCase();
+            const type = entry.type === "anime" || /anime|animation|cartoon/.test(catalogLabel) ? "anime" : entry.type;
             const identity = catalogIdentity(meta, type) || type + "|source|" + addon.id + "|" + meta.id;
             const existing = addonCatalogItems.find(item => item.identity === identity);
             const provider = {addon, catalogEntry:entry, metaId:meta.id, catalogName:entry.name || entry.id};
@@ -1227,7 +1259,9 @@ async function updateSource(id, changes) {
     return;
   }
   setStatus(sourceStatus, "تم تحديث حالة المصدر.");
+  resetAddonDiscovery();
   await loadSources();
+  if (activeView !== "library" && activeView !== "sources") loadAddonDiscovery(activeView);
 }
 
 async function deleteSource(id) {
@@ -1237,7 +1271,9 @@ async function deleteSource(id) {
     return;
   }
   setStatus(sourceStatus, "تم حذف المصدر من حسابك.");
+  resetAddonDiscovery();
   await loadSources();
+  if (activeView !== "library" && activeView !== "sources") loadAddonDiscovery(activeView);
 }
 
 document.querySelector("#source-form").addEventListener("submit", async event => {
@@ -1278,7 +1314,9 @@ document.querySelector("#source-form").addEventListener("submit", async event =>
   nameInput.value = "";
   urlInput.value = "";
   setStatus(sourceStatus, "تم حفظ المصدر في حسابك.");
+  resetAddonDiscovery();
   await loadSources();
+  if (activeView !== "library" && activeView !== "sources") loadAddonDiscovery(activeView);
 });
 
 
@@ -1366,7 +1404,9 @@ document.querySelector("#source-import-button").addEventListener("click", async 
     setStatus(status, "اكتمل الفحص: أُضيف " + accepted.length + "، استُبعد " + skipped +
       " غير مناسب، مكرر " + duplicates + "، تعذر فحص " + failed + ".");
     fileInput.value = "";
+    resetAddonDiscovery();
     await loadSources();
+    if (activeView !== "library" && activeView !== "sources") loadAddonDiscovery(activeView);
   } catch (error) {
     setStatus(status, error.message || "تعذر استيراد الملف.", true);
   } finally {
