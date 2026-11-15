@@ -53,5 +53,7 @@ The source manager reads enabled add-on HTTPS Manifests, lists declared catalogs
 
 
 ## PWA
+
+This branch includes the first staged catalog/player rebuild; it is not the production Pages deployment until merged.
 - يمكن تثبيت RAIF كتطبيق ويب من المتصفح بعد تفعيل Service Worker.
 - يتم تخزين هيكل الواجهة الأساسي فقط؛ لا تُخزّن روابط البث أو جلسات الدخول أو بيانات المستخدم في ذاكرة التخزين المؤقت.
