@@ -108,3 +108,12 @@
 
 #access-code{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:10px;background:#17181d;color:#fff;padding:14px;font:700 28px/1.2 system-ui,sans-serif;letter-spacing:12px;text-align:center;direction:ltr}
 #access-code:focus{outline:1px solid var(--accent);border-color:var(--accent)}
+
+.catalog-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:-8px 0 18px;color:var(--muted);font-size:12px}
+.catalog-diagnostics{display:grid;gap:8px;margin-top:18px;padding:13px 15px;border:1px solid var(--line);border-radius:12px;background:#17181d;color:#aeb0b9;font-size:12px}
+.catalog-diagnostics:empty{display:none}
+.catalog-diagnostics strong{color:var(--accent)}
+.catalog-diagnostics details{margin-top:5px}
+.catalog-diagnostics summary{cursor:pointer;color:#e2b47a}
+.catalog-diagnostics p{margin:7px 0;overflow-wrap:anywhere}
+.addon-card-poster{display:block;width:100%;aspect-ratio:2/3;object-fit:cover;background:#20232b}

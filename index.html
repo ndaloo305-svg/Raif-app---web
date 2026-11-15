@@ -42,8 +42,10 @@
         <div class="hero-art" aria-hidden="true"><div class="orb orb-one"></div><div class="orb orb-two"></div><div class="art-letter">R</div></div>
       </section>
       <section class="content-section">
-        <div class="section-heading"><div><span class="eyebrow">مختارة لك</span><h2 id="section-title">اكتشف المحتوى</h2></div><div class="filters" id="filters"><button class="filter active" data-filter="all">الكل</button><button class="filter" data-filter="movie">أفلام</button><button class="filter" data-filter="series">مسلسلات</button><button class="filter" data-filter="anime">أنمي</button></div></div>
+        <div class="section-heading"><div><span class="eyebrow">كتالوج موحّد من إضافاتك</span><h2 id="section-title">اكتشف المحتوى</h2></div><div class="filters" id="filters"><button class="filter active" data-filter="all">الكل</button><button class="filter" data-filter="movie">أفلام</button><button class="filter" data-filter="series">مسلسلات</button><button class="filter" data-filter="anime">أنمي</button></div></div>
+        <div class="catalog-toolbar"><span id="catalog-count" aria-live="polite"></span><button class="save-btn" id="refresh-catalog" type="button">تحديث الكتالوج</button></div>
         <div class="catalog-grid" id="catalog" aria-live="polite"></div>
+        <div id="catalog-diagnostics" class="catalog-diagnostics" aria-live="polite"></div>
         <p class="empty-state" id="empty" hidden>لا توجد نتائج مطابقة. جرّب كلمة بحث أخرى.</p>
       </section>
       <section class="content-section source-manager" id="source-manager" hidden>
