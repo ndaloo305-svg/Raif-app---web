@@ -1,0 +1,21 @@
+{
+  "id": "./",
+  "name": "RAIF",
+  "short_name": "RAIF",
+  "description": "مكتبتك الترفيهية في مكان واحد",
+  "lang": "ar",
+  "dir": "rtl",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#101114",
+  "theme_color": "#101114",
+  "icons": [
+    {
+      "src": "./assets/raif-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
