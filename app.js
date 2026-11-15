@@ -936,11 +936,11 @@ async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}, prog
   if (speedSelect) speedSelect.value = localStorage.getItem("raif-player-speed") || "1";
   video.hidden = false;
   if (embed) { embed.src = "about:blank"; embed.hidden = true; }
-  currentProgressKey = "raif-progress-" + hashPlaybackKey(progressIdentity || title);
-  lastProgressSavedAt = 0;
   status.textContent = "جارٍ تجهيز المشغل...";
   status.classList.remove("is-error");
   disposeStreamPlayer();
+  currentProgressKey = "raif-progress-" + hashPlaybackKey(progressIdentity || title);
+  lastProgressSavedAt = 0;
   video.playbackRate = Number(speedSelect?.value || 1);
   applySelectedSubtitle(video);
   dialog.showModal();
