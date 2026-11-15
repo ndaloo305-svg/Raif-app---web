@@ -53,5 +53,7 @@ The source manager reads enabled add-on HTTPS Manifests, lists declared catalogs
 
 
 ## PWA
+
+The staged implementation is under validation; merge to `main` only after browser and Edge Function checks pass.
 - يمكن تثبيت RAIF كتطبيق ويب من المتصفح بعد تفعيل Service Worker.
 - يتم تخزين هيكل الواجهة الأساسي فقط؛ لا تُخزّن روابط البث أو جلسات الدخول أو بيانات المستخدم في ذاكرة التخزين المؤقت.
