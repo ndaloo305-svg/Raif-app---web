@@ -673,9 +673,16 @@ async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}) {
   const isDash = /\.mpd(?:$|[?#\s])/.test(mediaHint) || /dash\+xml/.test(mime);
   video.onerror = () => { status.textContent = "تعذر تشغيل الرابط. تأكد أن الرابط ملف وسائط مباشر، وأن الخادم يسمح بالوصول من المتصفح (CORS)."; status.classList.add("is-error"); };
   video.onplaying = () => { status.textContent = "يتم التشغيل داخل RAIF."; status.classList.remove("is-error"); };
+  const startPlayback = () => video.play().catch(error => {
+    status.textContent = error?.name === "NotSupportedError"
+      ? "صيغة الفيديو غير مدعومة في متصفحك. اختر رابط HLS أو MP4 من المصادر."
+      : "تعذر بدء التشغيل تلقائياً؛ اضغط زر التشغيل داخل الفيديو.";
+    status.classList.add("is-error");
+  });
   if (isHls && video.canPlayType("application/vnd.apple.mpegurl")) {
     video.src = target.href;
-    status.textContent = "تم تجهيز بث HLS. اضغط تشغيل.";
+    status.textContent = "جارٍ بدء بث HLS...";
+    startPlayback();
   } else if (isHls) {
     try {
       const {default: Hls} = await import("https://esm.sh/hls.js@1.6.13");
@@ -683,7 +690,10 @@ async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}) {
       activeHlsPlayer = new Hls({enableWorker:true, lowLatencyMode:false, maxBufferLength:30});
       activeHlsPlayer.attachMedia(video);
       activeHlsPlayer.on(Hls.Events.MEDIA_ATTACHED, () => activeHlsPlayer?.loadSource(target.href));
-      activeHlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => { status.textContent = "تم تحميل قائمة HLS. اضغط تشغيل."; });
+      activeHlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => {
+        status.textContent = "تم تحميل قائمة HLS. جارٍ التشغيل...";
+        startPlayback();
+      });
       activeHlsPlayer.on(Hls.Events.ERROR, (_event, data) => {
         if (data.fatal) { status.textContent = "تعذر تشغيل HLS. تحقق من الرابط ودعم CORS."; status.classList.add("is-error"); }
       });
@@ -698,11 +708,13 @@ async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}) {
         status.textContent = "تعذر تشغيل DASH. تحقق من الرابط ودعم CORS.";
         status.classList.add("is-error");
       });
-      status.textContent = "تم تحميل مشغل DASH. اضغط تشغيل.";
+      status.textContent = "تم تحميل مشغل DASH. جارٍ التشغيل...";
+      startPlayback();
     } catch (error) { status.textContent = "تعذر تجهيز DASH: " + error.message; status.classList.add("is-error"); }
   } else {
     video.src = target.href;
-    status.textContent = "تم إرسال رابط الوسائط إلى المشغل. اضغط تشغيل.";
+    status.textContent = "جارٍ بدء تشغيل الفيديو...";
+    startPlayback();
   }
 }
 
@@ -809,6 +821,18 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
           try { const url = new URL(stream.url); return url.protocol === "https:" && !url.username && !url.password && !/\.torrent$/i.test(url.pathname); }
           catch { return false; }
         });
+        const playbackPriority = stream => {
+          let path = "";
+          try { path = new URL(stream.url).pathname.toLowerCase(); } catch {}
+          const mime = String(stream.behaviorHints?.mimeType || stream.mimeType || stream.type || "").toLowerCase();
+          if (/\.m3u8$/i.test(path) || /mpegurl/.test(mime)) return 0;
+          if (/\.(mp4|m4v)$/i.test(path) || /video\/mp4/.test(mime)) return 1;
+          if (/\.mpd$/i.test(path) || /dash\+xml/.test(mime)) return 2;
+          if (/\.webm$/i.test(path) || /video\/webm/.test(mime)) return 3;
+          if (/\.(mkv|avi|wmv|flv)$/i.test(path)) return 20;
+          return 5;
+        };
+        streams.sort((a, b) => playbackPriority(a) - playbackPriority(b));
         if (!streams.length) {
           const note = document.createElement("p");
           note.textContent = failedProviders && !rawStreams.length
@@ -836,20 +860,28 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
               link.rel = "noopener noreferrer";
               link.textContent = "فتح رابط المصدر";
               row.append(link);
-              const play = document.createElement("button");
-              play.type = "button";
-              play.className = "save-btn stream-play-btn";
-              play.textContent = "تشغيل داخل RAIF";
-              play.addEventListener("click", async () => {
-                try { await openStreamPlayer(target.href, name.textContent, stream); }
-                catch (error) {
-                  const note = document.createElement("small");
-                  note.className = "is-error";
-                  note.textContent = error.message;
-                  row.append(note);
-                }
-              });
-              row.append(play);
+              const unsupportedContainer = /\.(mkv|avi|wmv|flv)$/i.test(target.pathname) &&
+                !/video\/(mp4|webm)/i.test(String(stream.behaviorHints?.mimeType || stream.mimeType || ""));
+              if (unsupportedContainer) {
+                const note = document.createElement("small");
+                note.textContent = "هذا الملف بصيغة لا يدعمها مشغل الويب مباشرة. اختر رابط HLS أو MP4 من المصادر.";
+                row.append(note);
+              } else {
+                const play = document.createElement("button");
+                play.type = "button";
+                play.className = "save-btn stream-play-btn";
+                play.textContent = "تشغيل داخل RAIF";
+                play.addEventListener("click", async () => {
+                  try { await openStreamPlayer(target.href, name.textContent, stream); }
+                  catch (error) {
+                    const note = document.createElement("small");
+                    note.className = "is-error";
+                    note.textContent = error.message;
+                    row.append(note);
+                  }
+                });
+                row.append(play);
+              }
               if (target.protocol === "http:" && location.protocol === "https:") {
                 const warning = document.createElement("small");
                 warning.textContent = "قد يمنع المتصفح فتح HTTP من صفحة HTTPS.";
