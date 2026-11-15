@@ -149,6 +149,14 @@ function render() {
         : "لا توجد عناوين حقيقية في هذا القسم حتى الآن. أضف أو فعّل مصدرًا يوفّر كتالوجًا.";
   }
   empty.hidden = filtered.length > 0;
+  const catalogSummary = document.querySelector("#catalog-summary");
+  if (catalogSummary) {
+    const sourceCount = new Set(filtered.flatMap(item => (item._raifProviders || [{addon:item.addon}])
+      .map(provider => provider?.addon?.id).filter(Boolean))).size;
+    catalogSummary.textContent = filtered.length
+      ? "يعرض RAIF " + filtered.length + " عنوانًا حقيقيًا" + (sourceCount ? " من " + sourceCount + " مصدرًا." : ".")
+      : (addonCatalogLoading ? "جارٍ جلب الكتالوجات من المصادر المفعّلة..." : "لا توجد عناوين حقيقية للعرض حاليًا.");
+  }
 }
 
 async function loadFavorites() {
@@ -509,6 +517,32 @@ async function loadAddonDiscovery(view = activeView) {
   render();
 }
 
+document.querySelector("#player-speed")?.addEventListener("change", event => {
+  const video = document.querySelector("#raif-video");
+  video.playbackRate = Number(event.target.value) || 1;
+});
+document.querySelector("#player-quality")?.addEventListener("change", event => {
+  if (activeHlsPlayer) activeHlsPlayer.currentLevel = Number(event.target.value);
+});
+document.querySelector("#player-subtitles")?.addEventListener("change", event => {
+  const value = Number(event.target.value);
+  if (activeHlsPlayer) activeHlsPlayer.subtitleTrack = value;
+  const video = document.querySelector("#raif-video");
+  Array.from(video.textTracks || []).forEach((track, index) => {
+    track.mode = value === index ? "showing" : "disabled";
+  });
+});
+
+document.addEventListener("keydown", event => {
+  const dialog = document.querySelector("#player-dialog");
+  if (!dialog?.open || event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement || event.target instanceof HTMLTextAreaElement) return;
+  const video = document.querySelector("#raif-video");
+  if (event.key === " " && !event.repeat) { event.preventDefault(); video.paused ? video.play().catch(() => {}) : video.pause(); }
+  else if (event.key === "ArrowRight") { event.preventDefault(); video.currentTime = Math.min(video.duration || Infinity, video.currentTime + 10); }
+  else if (event.key === "ArrowLeft") { event.preventDefault(); video.currentTime = Math.max(0, video.currentTime - 10); }
+  else if (event.key.toLowerCase() === "f") { event.preventDefault(); if (!document.fullscreenElement) video.requestFullscreen?.(); else document.exitFullscreen?.(); }
+});
+
 function renderAddonMessage(message, isError = false) {
   addonCatalogResults.replaceChildren();
   const note = document.createElement("p");
@@ -590,6 +624,8 @@ async function inspectAddon(addon) {
 let activeHlsPlayer = null;
 let activeDashPlayer = null;
 let selectedSubtitle = null;
+let lastProgressSavedAt = 0;
+let currentProgressKey = "";
 
 function applySelectedSubtitle(video) {
   video.querySelectorAll('track[data-raif-subtitle="true"]').forEach(track => track.remove());
@@ -602,6 +638,11 @@ function applySelectedSubtitle(video) {
   track.default = true;
   track.dataset.raifSubtitle = "true";
   video.append(track);
+  const subtitleSelect = document.querySelector("#player-subtitles");
+  if (subtitleSelect) {
+    subtitleSelect.replaceChildren(new Option("إيقاف", "-1"), new Option(track.label || "ترجمة", "0"));
+    subtitleSelect.value = "0";
+  }
   track.addEventListener("load", () => {
     for (const item of video.textTracks) item.mode = item === track.track ? "showing" : "disabled";
   }, {once:true});
@@ -716,6 +757,15 @@ function disposeStreamPlayer() {
     video.load();
   }
 }
+function hashPlaybackKey(value) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index++) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
 async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}) {
   let target;
   try { target = new URL(rawUrl); } catch { throw new Error("رابط التشغيل غير صالح."); }
@@ -724,7 +774,17 @@ async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}) {
   const dialog = document.querySelector("#player-dialog");
   const video = document.querySelector("#raif-video");
   const status = document.querySelector("#player-status");
+  const qualityWrap = document.querySelector("#player-quality-wrap");
+  const qualitySelect = document.querySelector("#player-quality");
+  const subtitleSelect = document.querySelector("#player-subtitles");
+  const speedSelect = document.querySelector("#player-speed");
   document.querySelector("#player-title").textContent = title;
+  if (qualityWrap) qualityWrap.hidden = true;
+  if (qualitySelect) qualitySelect.replaceChildren(new Option("تلقائي", "-1"));
+  if (subtitleSelect) subtitleSelect.replaceChildren(new Option("إيقاف", "-1"));
+  if (speedSelect) speedSelect.value = "1";
+  currentProgressKey = "raif-progress-" + hashPlaybackKey(title + "|" + target.href);
+  lastProgressSavedAt = 0;
   status.textContent = "جارٍ تجهيز المشغل...";
   status.classList.remove("is-error");
   disposeStreamPlayer();
@@ -735,8 +795,30 @@ async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}) {
   const mediaHint = (target.pathname + " " + filename).toLowerCase();
   const isHls = /\.m3u8(?:$|[?#\s])/.test(mediaHint) || /mpegurl|vnd\.apple\.mpegurl/.test(mime);
   const isDash = /\.mpd(?:$|[?#\s])/.test(mediaHint) || /dash\+xml/.test(mime);
-  video.onerror = () => { status.textContent = "تعذر تشغيل الرابط. تأكد أن الرابط ملف وسائط مباشر، وأن الخادم يسمح بالوصول من المتصفح (CORS)."; status.classList.add("is-error"); };
+  video.onerror = () => { status.textContent = "تعذر تشغيل الرابط. قد يكون الرابط منتهيًا أو يتطلب CORS أو ترويسات لا يدعمها المتصفح."; status.classList.add("is-error"); };
   video.onplaying = () => { status.textContent = "يتم التشغيل داخل RAIF."; status.classList.remove("is-error"); };
+  video.onloadedmetadata = () => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(currentProgressKey) || "null");
+      if (saved && Number.isFinite(saved.time) && saved.time > 15 &&
+          (!Number.isFinite(video.duration) || saved.time < video.duration - 15)) {
+        video.currentTime = saved.time;
+        status.textContent = "استُعيد موضع المشاهدة السابق.";
+      }
+    } catch {}
+  };
+  video.ontimeupdate = () => {
+    if (!currentProgressKey || !Number.isFinite(video.currentTime) || video.currentTime < 5) return;
+    const now = Date.now();
+    if (now - lastProgressSavedAt < 8000) return;
+    lastProgressSavedAt = now;
+    try {
+      localStorage.setItem(currentProgressKey, JSON.stringify({
+        time: video.currentTime, duration: Number.isFinite(video.duration) ? video.duration : null,
+        updatedAt: now, title
+      }));
+    } catch {}
+  };
   const startPlayback = () => video.play().catch(error => {
     status.textContent = error?.name === "NotSupportedError"
       ? "صيغة الفيديو غير مدعومة في متصفحك. اختر رابط HLS أو MP4 من المصادر."
@@ -755,8 +837,25 @@ async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}) {
       activeHlsPlayer.attachMedia(video);
       activeHlsPlayer.on(Hls.Events.MEDIA_ATTACHED, () => activeHlsPlayer?.loadSource(target.href));
       activeHlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => {
+        const levels = activeHlsPlayer?.levels || [];
+        if (qualitySelect && levels.length) {
+          qualitySelect.replaceChildren(new Option("تلقائي", "-1"));
+          levels.forEach((level, index) => {
+            const label = level.height ? level.height + "p" : Math.round((level.bitrate || 0) / 1000) + " kbps";
+            qualitySelect.append(new Option(label, String(index)));
+          });
+          if (qualityWrap) qualityWrap.hidden = false;
+        }
         status.textContent = "تم تحميل قائمة HLS. جارٍ التشغيل...";
         startPlayback();
+      });
+      activeHlsPlayer.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, (_event, data) => {
+        if (!subtitleSelect) return;
+        subtitleSelect.replaceChildren(new Option("إيقاف", "-1"));
+        (data?.subtitleTracks || []).forEach((track, index) => {
+          const label = [track.name, track.lang].filter(Boolean).join(" · ") || ("ترجمة " + (index + 1));
+          subtitleSelect.append(new Option(label, String(index)));
+        });
       });
       activeHlsPlayer.on(Hls.Events.ERROR, (_event, data) => {
         if (data.fatal) { status.textContent = "تعذر تشغيل HLS. تحقق من الرابط ودعم CORS."; status.classList.add("is-error"); }
