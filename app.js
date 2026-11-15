@@ -758,6 +758,9 @@ function applySelectedSubtitle(video) {
 function setSelectedSubtitle(subtitle) {
   if (selectedSubtitle?.objectUrl) URL.revokeObjectURL(selectedSubtitle.objectUrl);
   selectedSubtitle = subtitle;
+  if (subtitle?.language && subtitle.language !== "und") {
+    try { localStorage.setItem("raif-subtitle-language", subtitle.language); } catch {}
+  }
   const video = document.querySelector("#raif-video");
   if (video) applySelectedSubtitle(video);
 }
@@ -818,7 +821,9 @@ async function findSubtitles(meta, catalogEntry, area, button) {
         language: /^[a-z]{2,3}(?:-[a-z0-9]+)?$/i.test(entry.langCode || "") ? entry.langCode : "und"
       }));
   }));
-  const subtitles = results.flatMap(result => result.status === "fulfilled" ? result.value : []);
+  const preferredLanguage = localStorage.getItem("raif-subtitle-language") || "ar";
+  const subtitles = results.flatMap(result => result.status === "fulfilled" ? result.value : [])
+    .sort((a,b) => Number(b.language.toLowerCase().startsWith(preferredLanguage)) - Number(a.language.toLowerCase().startsWith(preferredLanguage)));
   if (!subtitles.length) {
     const note = document.createElement("p");
     note.textContent = "لم تُرجع المصادر ترجمات لهذا العنوان، أو تعذر الوصول إلى أحدها.";
@@ -973,6 +978,11 @@ async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}, prog
     status.textContent = "يتم التشغيل داخل RAIF.";
     status.classList.remove("is-error");
     recordStreamHealth(target.href, true);
+    try {
+      localStorage.setItem("raif-last-source-" + hashPlaybackKey(progressIdentity || title), JSON.stringify({
+        url:target.href, provider:stream._raifProviderName || stream.name || stream.title || "", usedAt:Date.now()
+      }));
+    } catch {}
     markPlaying();
   };
   video.onloadedmetadata = () => {
@@ -1256,11 +1266,18 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
           if (/english|انجليزي|إنجليزي/.test(label)) return 1;
           return 0;
         };
+        let lastSourceUrl = "";
+        try {
+          lastSourceUrl = JSON.parse(localStorage.getItem("raif-last-source-" +
+            hashPlaybackKey(catalogEntry.type + ":" + meta.id + ":" + (selectedVideoId || ""))) || "{}").url || "";
+        } catch {}
         dedupedStreams.sort((a,b) => {
           const ah=getStreamHealth(a.url), bh=getStreamHealth(b.url);
           const aHealth=(ah.successes||0)*2-(ah.failures||0);
           const bHealth=(bh.successes||0)*2-(bh.failures||0);
-          return (qualityRank(b)-qualityRank(a)) ||
+          const aLast=Number(a.url===lastSourceUrl), bLast=Number(b.url===lastSourceUrl);
+          return (bLast-aLast) ||
+            (qualityRank(b)-qualityRank(a)) ||
             (languageRank(b)-languageRank(a)) ||
             (bHealth-aHealth) ||
             (playbackPriority(a)-playbackPriority(b));
