@@ -745,6 +745,7 @@ let activeDashPlayer = null;
 let selectedSubtitle = null;
 let lastProgressSavedAt = 0;
 let currentProgressKey = "";
+let activeStreamFallback = null;
 
 function applySelectedSubtitle(video) {
   video.querySelectorAll('track[data-raif-subtitle="true"]').forEach(track => track.remove());
@@ -910,7 +911,7 @@ async function openEmbedPlayer(rawUrl, title = "RAIF Player") {
   embed.src = target.href;
   document.querySelector("#player-title").textContent = title;
   setStatus(document.querySelector("#player-status"), "يتم عرض المشغل الخارجي. الترجمة وإعدادات الجودة تخضع للمنصة.");
-  dialog.showModal();
+  if (!dialog.open) dialog.showModal();
 }
 
 function hashPlaybackKey(value) {
@@ -964,7 +965,7 @@ async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}, prog
   lastProgressSavedAt = 0;
   video.playbackRate = Number(speedSelect?.value || 1);
   applySelectedSubtitle(video);
-  dialog.showModal();
+  if (!dialog.open) dialog.showModal();
   const mime = String(stream.behaviorHints?.mimeType || stream.mimeType || stream.type || "").toLowerCase();
   const filename = String(stream.behaviorHints?.filename || stream.filename || "");
   const mediaHint = (target.pathname + " " + filename).toLowerCase();
@@ -987,7 +988,12 @@ async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}, prog
     status.textContent = message;
     status.classList.add("is-error");
     recordStreamHealth(target.href, false);
-    if (playbackSettled) return;
+    if (playbackSettled) {
+      const fallback = activeStreamFallback;
+      activeStreamFallback = null;
+      if (fallback) fallback();
+      return;
+    }
     playbackSettled = true;
     clearTimeout(playbackTimeout);
     rejectPlayback(new Error(message));
@@ -1093,6 +1099,33 @@ async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}, prog
   await playbackReady;
 }
 
+async function playStreamsWithFallback(streams, startIndex, title, progressIdentity) {
+  let lastError = null;
+  for (let index = startIndex; index < streams.length; index++) {
+    const candidate = streams[index];
+    try {
+      await openStreamPlayer(candidate.url, candidate.name || candidate.title || "RAIF", candidate, progressIdentity);
+      activeStreamFallback = () => {
+        activeStreamFallback = null;
+        const status = document.querySelector("#player-status");
+        status.textContent = "توقف المصدر الحالي؛ جارٍ تجربة المصدر التالي...";
+        disposeStreamPlayer();
+        playStreamsWithFallback(streams, index + 1, title, progressIdentity).then(result => {
+          if (!result.success) {
+            status.textContent = "تعذر تشغيل بقية المصادر. " + (result.error?.message || "");
+            status.classList.add("is-error");
+          }
+        });
+      };
+      return {success:true};
+    } catch (error) {
+      lastError = error;
+      disposeStreamPlayer();
+    }
+  }
+  return {success:false,error:lastError};
+}
+
 async function openAddonMeta(addon, catalogEntry, catalogMeta) {
   setSelectedSubtitle(null);
   const dialog = document.querySelector("#detail-dialog");
@@ -1193,25 +1226,15 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
       bestButton.disabled = true;
       bestButton.textContent = "جارٍ تجربة أفضل المصادر...";
       const progressId = catalogEntry.type + ":" + meta.id + ":" + (selectedVideoId || "");
-      let lastError = null;
-      for (const candidate of availableStreams) {
-        try {
-          await openStreamPlayer(candidate.url, candidate.name || candidate.title || "RAIF", candidate, progressId);
-          bestButton.textContent = "يتم التشغيل";
-          return;
-        } catch (error) {
-          lastError = error;
-          const playerDialog = document.querySelector("#player-dialog");
-          if (playerDialog.open) playerDialog.close();
-          disposeStreamPlayer();
-        }
-      }
+      const result = await playStreamsWithFallback(availableStreams, 0, heading.textContent, progressId);
       bestButton.disabled = false;
-      bestButton.textContent = "إعادة تجربة أفضل مصدر";
-      const note = document.createElement("p");
-      note.className = "auth-status is-error";
-      note.textContent = "لم ينجح تشغيل أي مصدر. آخر خطأ: " + (lastError?.message || "غير معروف");
-      streamsArea.prepend(note);
+      bestButton.textContent = result.success ? "يتم التشغيل · إعادة اختيار أفضل مصدر" : "إعادة تجربة أفضل مصدر";
+      if (!result.success) {
+        const note = document.createElement("p");
+        note.className = "auth-status is-error";
+        note.textContent = "لم ينجح تشغيل أي مصدر. آخر خطأ: " + (result.error?.message || "غير معروف");
+        streamsArea.prepend(note);
+      }
     });
     streamsButton.addEventListener("click", async () => {
       streamsButton.disabled = true;
@@ -1378,14 +1401,13 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
                 play.className = "save-btn stream-play-btn";
                 play.textContent = "تشغيل داخل RAIF";
                 play.addEventListener("click", async () => {
-                  try { await openStreamPlayer(target.href, name.textContent, stream, catalogEntry.type + ":" + meta.id + ":" + (selectedVideoId || "")); }
-                  catch (error) {
-                    const playerDialog = document.querySelector("#player-dialog");
-                    if (playerDialog.open) playerDialog.close();
-                    disposeStreamPlayer();
+                  const startIndex = availableStreams.findIndex(item => item.url === stream.url);
+                  const result = await playStreamsWithFallback(availableStreams, Math.max(0,startIndex),
+                    name.textContent, catalogEntry.type + ":" + meta.id + ":" + (selectedVideoId || ""));
+                  if (!result.success) {
                     const note = document.createElement("small");
                     note.className = "is-error";
-                    note.textContent = error.message;
+                    note.textContent = result.error?.message || "تعذر تشغيل المصدر.";
                     row.append(note);
                   }
                 });
@@ -1753,7 +1775,10 @@ document.querySelector("#close-player").addEventListener("click", () => {
   document.querySelector("#player-dialog").close();
   disposeStreamPlayer();
 });
-document.querySelector("#player-dialog").addEventListener("close", disposeStreamPlayer);
+document.querySelector("#player-dialog").addEventListener("close", () => {
+  activeStreamFallback = null;
+  disposeStreamPlayer();
+});
 
 document.querySelector("#detail-dialog").addEventListener("click", event => {
   if (event.target.id === "detail-dialog") event.currentTarget.close();
