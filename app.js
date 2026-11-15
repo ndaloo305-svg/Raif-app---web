@@ -11,6 +11,7 @@ let activeView = "home";
 let currentUser = null;
 const SHARED_ACCOUNT_EMAIL = "raif-shared@puhipyjljmbvczijtzkb.supabase.co";
 let savedIds = [];
+let savedItems = [];
 let favoritesLoading = false;
 let addons = [];
 let addonCatalogItems = [];
@@ -65,15 +66,11 @@ function render() {
   const q = search.value.trim().toLocaleLowerCase("ar");
   const matches = (item) =>
     (activeFilter === "all" || item.type === activeFilter) &&
-    (activeView !== "library" || (item._kind === "demo" && savedIds.includes(item.id))) &&
     ((item.title || "").toLocaleLowerCase("ar").includes(q) ||
-      (item.genre || "").toLocaleLowerCase("ar").includes(q));
-  const addonMatches = addonCatalogItems
-    .filter(item => activeView !== "library" && matches(item));
-  const demoMatches = addonMatches.length
-    ? []
-    : items.map(item => ({...item, _kind:"demo"})).filter(matches);
-  const filtered = [...addonMatches, ...demoMatches];
+      (item.genre || "").toLocaleLowerCase("ar").includes(q) ||
+      String(item.year || "").includes(q));
+  const visibleItems = activeView === "library" ? savedItems : addonCatalogItems;
+  const filtered = visibleItems.filter(matches);
 
   catalog.replaceChildren();
   filtered.forEach(item => {
@@ -82,7 +79,7 @@ function render() {
     card.tabIndex = 0;
     card.setAttribute("role", "button");
     card.setAttribute("aria-label", "تفاصيل " + item.title);
-    if (item._kind === "addon") {
+    if (item._kind === "addon" || item._kind === "saved") {
       const posterUrl = safeHttpsUrl(item.poster);
       if (posterUrl) {
         const poster = document.createElement("img");
@@ -130,7 +127,22 @@ function render() {
     }
     card.addEventListener("click", () => {
       if (item._kind === "addon") openAddonMeta(item.addon, item.catalogEntry, item.meta);
-      else openDetail(item.id);
+      else if (item._kind === "saved") {
+        const addon = addons.find(candidate => candidate.id === item.addon_id);
+        if (addon) {
+          openAddonMeta(addon, {type:item.catalog_type || item.type, id:item.catalog_id || item.catalog_type || item.type},
+            {id:item.meta_id || item.id, name:item.title, year:item.year, poster:item.poster, description:item.description});
+        } else {
+          const detail = document.querySelector("#detail-content");
+          detail.replaceChildren();
+          const title = document.createElement("h2");
+          title.textContent = item.title;
+          const note = document.createElement("p");
+          note.textContent = item.description || "العنوان محفوظ في مكتبتك، لكن مصدر البيانات المرتبط به لم يعد متاحًا.";
+          detail.append(title,note);
+          document.querySelector("#detail-dialog").showModal();
+        }
+      }
     });
     card.addEventListener("keydown", event => {
       if (event.key === "Enter" || event.key === " ") {
@@ -187,11 +199,18 @@ async function loadFavorites() {
     return;
   }
 
-  savedIds = (data || [])
-    .map(row => Number(row.metadata?.demo_id))
-    .filter(id => Number.isInteger(id) && items.some(item => item.id === id));
-
-  await migrateLocalFavorites();
+  savedItems = (data || []).map(row => {
+    const meta = row.metadata || {};
+    return {
+      _kind:"saved", content_id:row.content_id, id:meta.meta_id || row.content_id,
+      type:meta.catalog_type || row.content_type, title:meta.title || "عنوان محفوظ",
+      year:meta.year || "", genre:meta.genre || "", poster:meta.poster || "",
+      description:meta.description || "", meta_id:meta.meta_id || row.content_id,
+      addon_id:meta.addon_id || "", catalog_id:meta.catalog_id || "",
+      catalog_type:meta.catalog_type || row.content_type
+    };
+  });
+  savedIds = (data || []).map(row => row.content_id);
   render();
 }
 
@@ -243,31 +262,45 @@ async function toggleFavorite(item) {
 
   const button = document.querySelector("#toggle-save");
   if (button) button.disabled = true;
-  const contentId = `demo-${item.id}`;
+  const contentId = item.content_id || ("stremio:" + item.type + ":" + item.id);
   const contentType = itemContentType(item);
+  const isSaved = savedIds.includes(contentId);
+  const provider = item._raifProviders?.[0] || {addon:item.addon, catalogEntry:item.catalogEntry};
+  const metadata = {
+    meta_id:item.id,
+    title:item.title || item.meta?.name || item.id,
+    year:item.year || item.meta?.year || "",
+    genre:item.genre || (Array.isArray(item.meta?.genres) ? item.meta.genres.join("، ") : ""),
+    poster:item.poster || item.meta?.poster || "",
+    description:item.meta?.description || "",
+    catalog_type:item.type,
+    catalog_id:provider.catalogEntry?.id || "",
+    addon_id:provider.addon?.id || ""
+  };
   let error;
 
-  if (savedIds.includes(item.id)) {
+  if (isSaved) {
     ({ error } = await supabase.from("favorites")
       .delete()
       .eq("user_id", currentUser.id)
       .eq("content_id", contentId)
       .eq("content_type", contentType));
-    if (!error) savedIds = savedIds.filter(id => id !== item.id);
+    if (!error) {
+      savedIds = savedIds.filter(id => id !== contentId);
+      savedItems = savedItems.filter(entry => entry.content_id !== contentId);
+    }
   } else {
     ({ error } = await supabase.from("favorites").insert({
       user_id: currentUser.id,
       content_id: contentId,
       content_type: contentType,
-      metadata: {
-        demo_id: item.id,
-        title: item.title,
-        year: item.year,
-        genre: item.genre,
-        catalog_type: item.type
-      }
+      metadata
     }));
-    if (!error) savedIds = [...savedIds, item.id];
+    if (!error) {
+      savedIds = [...savedIds, contentId];
+      savedItems = [...savedItems, {...metadata, _kind:"saved", content_id:contentId, id:item.id,
+        type:item.type, title:metadata.title, year:metadata.year, genre:metadata.genre, poster:metadata.poster}];
+    }
   }
 
   if (error) {
@@ -278,10 +311,10 @@ async function toggleFavorite(item) {
 
   setStatus(accountStatus, "تم تحديث مكتبتك ومزامنتها مع RAIF.");
   if (button) {
-    button.textContent = savedIds.includes(item.id) ? "إزالة من مكتبتي" : "＋ أضف إلى مكتبتي";
+    button.textContent = savedIds.includes(contentId) ? "إزالة من مكتبتي" : "＋ أضف إلى مكتبتي";
     button.disabled = false;
   }
-  if (activeView === "library") render();
+  render();
 }
 
 function openDetail(id) {
@@ -981,6 +1014,20 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
     subtitleButton.addEventListener("click", () => findSubtitles(meta, catalogEntry, subtitleArea, subtitleButton));
     content.append(subtitleButton, subtitleArea);
 
+    const favoriteButton = document.createElement("button");
+    favoriteButton.type = "button";
+    favoriteButton.className = "save-btn";
+    favoriteButton.id = "toggle-save";
+    favoriteButton.textContent = savedIds.includes("stremio:" + catalogEntry.type + ":" + meta.id)
+      ? "إزالة من مكتبتي" : "＋ أضف إلى مكتبتي";
+    favoriteButton.addEventListener("click", () => toggleFavorite({
+      id:meta.id, type:catalogEntry.type === "anime" ? "anime" : catalogEntry.type,
+      title:meta.name || catalogMeta.name || meta.id, year:meta.year || catalogMeta.year || "",
+      genre:Array.isArray(meta.genres) ? meta.genres.join("، ") : "",
+      poster:meta.poster || catalogMeta.poster || "", meta, addon, catalogEntry
+    }));
+    content.append(favoriteButton);
+
     const streamsButton = document.createElement("button");
     streamsButton.type = "button";
     streamsButton.className = "primary-btn";
@@ -1517,6 +1564,7 @@ document.querySelector("#sign-out").addEventListener("click", async () => {
   }
   currentUser = null;
   savedIds = [];
+  savedItems = [];
   updateAuthView();
   render();
   setStatus(authStatus, "تم تسجيل الخروج.");
