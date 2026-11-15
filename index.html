@@ -45,6 +45,12 @@
       </section>
       <section class="content-section">
         <div class="section-heading"><div><span class="eyebrow">اكتشاف من جميع مصادرك</span><h2 id="section-title">اكتشف المحتوى</h2></div><div class="filters" id="filters"><button class="filter active" data-filter="all">الكل</button><button class="filter" data-filter="movie">أفلام</button><button class="filter" data-filter="series">مسلسلات</button><button class="filter" data-filter="anime">أنمي</button></div></div>
+        <div class="genre-toolbar">
+          <div class="genre-filters" id="genre-filters" aria-label="التصنيف حسب النوع" hidden></div>
+          <label class="sort-control" for="catalog-sort">ترتيب النتائج
+            <select id="catalog-sort"><option value="recommended">الموصى به</option><option value="latest">الأحدث</option><option value="oldest">الأقدم</option><option value="title">الاسم</option></select>
+          </label>
+        </div>
         <div class="catalog-toolbar"><span id="catalog-count" aria-live="polite"></span><button class="save-btn" id="refresh-catalog" type="button">تحديث الكتالوج</button></div>
         <div class="catalog-grid" id="catalog" aria-live="polite"></div>
         <div id="catalog-diagnostics" class="catalog-diagnostics" aria-live="polite"></div>
