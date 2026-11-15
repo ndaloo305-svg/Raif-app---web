@@ -93,7 +93,7 @@ function render() {
     const label = document.createElement("span"); label.className = "poster-label"; label.textContent = [typeNames[item.type] || item.type,item.year].filter(Boolean).join(" · ");
     const title = document.createElement("div"); title.className = "media-title"; title.textContent = item.title || "عنوان بدون اسم";
     const detail = document.createElement("div"); detail.className = "media-meta"; detail.textContent = [item.genre,item.providers.length + " مصدر"].filter(Boolean).join(" · ");
-    card.append(label,title,detail); card.addEventListener("click",() => openAddonMeta(item.addon,item.catalogEntry,item.meta));
+    card.append(label,title,detail); card.addEventListener("click",() => openAddonMeta(item.addon,item.catalogEntry,item.meta,item.providers));
     card.addEventListener("keydown",event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); card.click(); } }); catalog.append(card);
   });
   const count = document.querySelector("#catalog-count"); if (count) count.textContent = filtered.length ? filtered.length.toLocaleString("ar") + " عنوان موحّد · " + filtered.reduce((sum,item) => sum + item.providers.length,0).toLocaleString("ar") + " نتائج مصادر" : "";
@@ -689,7 +689,7 @@ async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}) {
   }
 }
 
-async function openAddonMeta(addon, catalogEntry, catalogMeta) {
+async function openAddonMeta(addon, catalogEntry, catalogMeta, providers = [{addon,catalogEntry,meta:catalogMeta}]) {
   setSelectedSubtitle(null);
   const dialog = document.querySelector("#detail-dialog");
   const content = document.querySelector("#detail-content");
@@ -709,6 +709,10 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
     facts.textContent = [meta.year, meta.runtime, ...(Array.isArray(meta.genres) ? meta.genres : [])]
       .filter(Boolean).join(" · ");
     content.append(facts);
+    const sourceInfo = document.createElement("p");
+    sourceInfo.className = "detail-note";
+    sourceInfo.textContent = "المصادر التي وفّرت هذا العنوان: " + [...new Set(providers.map(source => source.addon.name || source.addon.addon_id))].join("، ");
+    content.append(sourceInfo);
 
     if (typeof meta.poster === "string" && safeHttpsUrl(meta.poster)) {
       const poster = document.createElement("img");
