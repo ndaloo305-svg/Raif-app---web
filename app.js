@@ -106,6 +106,21 @@ function normalizeTitle(value) {
   return String(value || "").normalize("NFKD").replace(/[\u064B-\u065F\u0670\u0640]/g, "").replace(/[أإآ]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه").toLocaleLowerCase("ar").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 }
 
+const GENRE_LABELS = new Map([
+  ["action","أكشن"],["adventure","مغامرة"],["animation","رسوم متحركة"],["anime","أنمي"],
+  ["comedy","كوميديا"],["crime","جريمة"],["documentary","وثائقي"],["drama","دراما"],
+  ["family","عائلي"],["fantasy","فانتازيا"],["history","تاريخي"],["horror","رعب"],
+  ["music","موسيقي"],["mystery","غموض"],["romance","رومانسي"],["sci fi","خيال علمي"],
+  ["science fiction","خيال علمي"],["thriller","إثارة وتشويق"],["war","حربي"],
+  ["western","ويسترن"],["reality","تلفزيون واقعي"],["news","أخبار"],
+  ["talk show","حواري"],["sport","رياضي"],["sports","رياضي"],
+  ["sci fi fantasy","خيال علمي وفانتازيا"]
+]);
+function genreDisplayName(value) {
+  const raw=String(value||"").trim();
+  return GENRE_LABELS.get(normalizeTitle(raw))||raw;
+}
+
 function catalogIdentity(type, meta) {
   const imdb = [meta?.imdb_id,meta?.imdbId,meta?.id].find(value => typeof value === "string" && /^tt\d+$/i.test(value.trim()));
   const tmdb = [meta?.tmdb_id,meta?.tmdbId].find(value => value != null && /^\d+$/.test(String(value).trim()));
@@ -127,7 +142,7 @@ function mergeCatalogMeta(addon, entry, meta) {
     if (!item.poster && meta.poster) item.poster = meta.poster;
     return;
   }
-  addonCatalogItems.push({_kind:"addon",identity,providers:[provider],addon,catalogEntry:entry,meta,id:meta.id,type,title:meta.name || meta.title || meta.id,year:meta.year || "",genre:Array.isArray(meta.genres) ? meta.genres.join("، ") : "",poster:meta.poster || ""});
+  addonCatalogItems.push({_kind:"addon",identity,providers:[provider],addon,catalogEntry:entry,meta,id:meta.id,type,title:meta.name || meta.title || meta.id,year:meta.year || "",genre:Array.isArray(meta.genres) ? meta.genres.map(genreDisplayName).join("، ") : "",poster:meta.poster || ""});
 }
 
 function getItemGenres(item) {
@@ -150,7 +165,7 @@ function renderGenreFilters(items) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "genre-chip" + (activeGenre === key ? " active" : "");
-    button.textContent = label;
+    button.textContent = key === "all" ? label : genreDisplayName(label);
     button.setAttribute("aria-pressed", String(activeGenre === key));
     button.addEventListener("click", () => { activeGenre = key; render(); });
     host.append(button);
@@ -810,7 +825,7 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta, providers = [{add
     const meta = result?.meta || catalogMeta;
     summary.textContent = meta.description || "لا توجد تفاصيل إضافية لهذا العنوان.";
     const facts = document.createElement("p");
-    facts.textContent = [meta.year,meta.runtime,...(Array.isArray(meta.genres)?meta.genres:[])].filter(Boolean).join(" · ");
+    facts.textContent = [meta.year,meta.runtime,...(Array.isArray(meta.genres)?meta.genres.map(genreDisplayName):[])].filter(Boolean).join(" · ");
     content.append(facts);
     const trackedItem=addonCatalogItems.find(x=>x.identity===catalogIdentity(catalogEntry.type,catalogMeta))||{identity:catalogIdentity(catalogEntry.type,catalogMeta),title:meta.name||catalogMeta.name||"عنوان",type:catalogEntry.type,year:meta.year||catalogMeta.year||"",poster:meta.poster||""};
     const actions=document.createElement("div");actions.className="detail-actions";
