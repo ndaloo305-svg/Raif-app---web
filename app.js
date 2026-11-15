@@ -130,7 +130,7 @@ function render() {
       else if (item._kind === "saved") {
         const addon = addons.find(candidate => candidate.id === item.addon_id);
         if (addon) {
-          openAddonMeta(addon, {type:item.catalog_type || item.type, id:item.catalog_id || item.catalog_type || item.type},
+          openAddonMeta(addon, {type:item.catalog_resource_type || item.type, id:item.catalog_id || item.catalog_resource_type || item.type},
             {id:item.meta_id || item.id, name:item.title, year:item.year, poster:item.poster, description:item.description});
         } else {
           const detail = document.querySelector("#detail-content");
@@ -181,6 +181,7 @@ function render() {
 async function loadFavorites() {
   if (!currentUser) {
     savedIds = [];
+    savedItems = [];
     favoritesLoading = false;
     render();
     return;
@@ -207,51 +208,14 @@ async function loadFavorites() {
       year:meta.year || "", genre:meta.genre || "", poster:meta.poster || "",
       description:meta.description || "", meta_id:meta.meta_id || row.content_id,
       addon_id:meta.addon_id || "", catalog_id:meta.catalog_id || "",
-      catalog_type:meta.catalog_type || row.content_type
+      catalog_type:meta.catalog_type || row.content_type,
+      catalog_resource_type:meta.catalog_resource_type || meta.catalog_type || row.content_type
     };
   });
   savedIds = (data || []).map(row => row.content_id);
   render();
 }
 
-async function migrateLocalFavorites() {
-  if (!currentUser) return;
-  let oldIds = [];
-  try {
-    const stored = JSON.parse(localStorage.getItem("raif-web-saved-items") || "[]");
-    if (Array.isArray(stored)) oldIds = stored.filter(Number.isInteger);
-  } catch {
-    oldIds = [];
-  }
-  const pending = oldIds.filter(id => items.some(item => item.id === id) && !savedIds.includes(id));
-  if (!pending.length) return;
-
-  const rows = pending.map(id => {
-    const item = items.find(entry => entry.id === id);
-    return {
-      user_id: currentUser.id,
-      content_id: `demo-${item.id}`,
-      content_type: itemContentType(item),
-      metadata: {
-        demo_id: item.id,
-        title: item.title,
-        year: item.year,
-        genre: item.genre,
-        catalog_type: item.type
-      }
-    };
-  });
-  const { error } = await supabase.from("favorites").upsert(rows, {
-    onConflict: "user_id,content_id,content_type",
-    ignoreDuplicates: true
-  });
-  if (!error) {
-    localStorage.removeItem("raif-web-saved-items");
-    savedIds = [...new Set([...savedIds, ...pending])];
-  } else {
-    setStatus(accountStatus, "تعذر نقل العناصر المحفوظة القديمة: " + error.message, true);
-  }
-}
 
 async function toggleFavorite(item) {
   if (!currentUser) {
@@ -262,7 +226,8 @@ async function toggleFavorite(item) {
 
   const button = document.querySelector("#toggle-save");
   if (button) button.disabled = true;
-  const contentId = item.content_id || ("stremio:" + item.type + ":" + item.id);
+  const resourceType = item.catalogEntry?.type || item.catalog_resource_type || item.type;
+  const contentId = item.content_id || ("stremio:" + resourceType + ":" + item.id);
   const contentType = itemContentType(item);
   const isSaved = savedIds.includes(contentId);
   const provider = item._raifProviders?.[0] || {addon:item.addon, catalogEntry:item.catalogEntry};
@@ -274,8 +239,9 @@ async function toggleFavorite(item) {
     poster:item.poster || item.meta?.poster || "",
     description:item.meta?.description || "",
     catalog_type:item.type,
-    catalog_id:provider.catalogEntry?.id || "",
-    addon_id:provider.addon?.id || ""
+    catalog_resource_type:provider.catalogEntry?.type || item.catalog_resource_type || item.type,
+    catalog_id:provider.catalogEntry?.id || item.catalog_id || "",
+    addon_id:provider.addon?.id || item.addon_id || ""
   };
   let error;
 
@@ -317,20 +283,6 @@ async function toggleFavorite(item) {
   render();
 }
 
-function openDetail(id) {
-  const item = items.find(entry => entry.id === id);
-  if (!item) return;
-  const isSaved = savedIds.includes(item.id);
-  document.querySelector("#detail-content").innerHTML = `
-    <span class="eyebrow">${typeNames[item.type]} · ${item.year}</span>
-    <h2>${item.title}</h2>
-    <p>${item.description}</p>
-    <button class="save-btn" id="toggle-save" type="button">${isSaved ? "إزالة من مكتبتي" : "＋ أضف إلى مكتبتي"}</button>
-    <div class="detail-note">حالة المحتوى: بيانات تجريبية. المفضلة تُحفظ في حساب RAIF بعد تسجيل الدخول، أما مصادر البث فلم تُربط بعد.</div>
-  `;
-  document.querySelector("#toggle-save").addEventListener("click", () => toggleFavorite(item));
-  document.querySelector("#detail-dialog").showModal();
-}
 
 async function loadSources() {
   const list = document.querySelector("#source-list");
