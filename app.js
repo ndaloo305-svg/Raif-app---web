@@ -4,14 +4,7 @@ const SUPABASE_URL = "https://puhipyjljmbvczijtzkb.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_cfCNLzoEfFSf5mLwunrmCw_qDdyWIo7";
 const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
 
-const items = [
- {id:1,title:"رحلة إلى المجهول",type:"movie",year:"2025",genre:"مغامرة",symbol:"✧",c1:"#4d3b35",c2:"#171c2b",description:"عنوان تجريبي لعرض شكل بطاقة المحتوى وتفاصيلها داخل واجهة RAIF."},
- {id:2,title:"مدينة الظلال",type:"series",year:"2024",genre:"دراما",symbol:"◈",c1:"#273d4a",c2:"#151a25",description:"بيانات تجريبية فقط. لم يتم ربط أي مزود محتوى أو مصدر بث بعد."},
- {id:3,title:"آخر المحاربين",type:"anime",year:"2025",genre:"أنمي",symbol:"武",c1:"#6b3e35",c2:"#241923",description:"بطاقة أنمي تجريبية لا تمثل عملاً حقيقياً أو رابط مشاهدة."},
- {id:4,title:"ما وراء النجوم",type:"movie",year:"2023",genre:"خيال علمي",symbol:"✦",c1:"#334b63",c2:"#17192b",description:"مساحة مخصصة مستقبلاً لبيانات TMDB أو مصدر بيانات تختاره."},
- {id:5,title:"ملفات سرية",type:"series",year:"2025",genre:"تشويق",symbol:"⌁",c1:"#51433a",c2:"#1b1b22",description:"سيتم لاحقاً توصيل صفحة التفاصيل بمصادر المحتوى المتاحة."},
- {id:6,title:"أفق جديد",type:"anime",year:"2024",genre:"خيال",symbol:"星",c1:"#66513b",c2:"#202238",description:"هذا المحتوى الوهمي موجود لاختبار العرض والبحث والتصفية فقط."}
-];
+const items = [];
 
 let activeFilter = "all";
 let activeView = "home";
@@ -23,6 +16,9 @@ let addons = [];
 let addonCatalogItems = [];
 let addonCatalogLoading = false;
 const addonDiscoveryCache = new Set();
+const addonManifestCache = new Map();
+const addonDiscoveryErrors = [];
+let addonDiscoveryRun = 0;
 
 const catalog = document.querySelector("#catalog");
 const search = document.querySelector("#search");
@@ -59,91 +55,55 @@ function itemContentType(item) {
   return item.type === "movie" ? "movie" : "series";
 }
 
-function render() {
-  const q = search.value.trim().toLocaleLowerCase("ar");
-  const matches = (item) =>
-    (activeFilter === "all" || item.type === activeFilter) &&
-    (activeView !== "library" || (item._kind === "demo" && savedIds.includes(item.id))) &&
-    ((item.title || "").toLocaleLowerCase("ar").includes(q) ||
-      (item.genre || "").toLocaleLowerCase("ar").includes(q));
-  const addonMatches = addonCatalogItems
-    .filter(item => activeView !== "library" && matches(item));
-  const demoMatches = addonMatches.length
-    ? []
-    : items.map(item => ({...item, _kind:"demo"})).filter(matches);
-  const filtered = [...addonMatches, ...demoMatches];
+function normalizeTitle(value) {
+  return String(value || "").normalize("NFKD").replace(/[\u064B-\u065F\u0670\u0640]/g, "").replace(/[أإآ]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه").toLocaleLowerCase("ar").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+}
 
+function catalogIdentity(type, meta) {
+  const ids = [meta?.imdb_id, meta?.imdbId, meta?.tmdb_id, meta?.tmdbId].filter(value => typeof value === "string" && /^(tt\d+|\d+)$/i.test(value.trim()));
+  if (ids.length) return type + "|id|" + ids[0].toLowerCase();
+  const title = normalizeTitle(meta?.name || meta?.title || meta?.id);
+  const year = String(meta?.year || "").match(/\d{4}/)?.[0] || "";
+  return type + "|title|" + title + "|" + year;
+}
+
+function mergeCatalogMeta(addon, entry, meta) {
+  if (!meta?.id) return;
+  const type = entry.type === "anime" ? "anime" : entry.type;
+  const identity = catalogIdentity(type, meta);
+  let item = addonCatalogItems.find(candidate => candidate.identity === identity);
+  const provider = {addon, catalogEntry:entry, meta};
+  if (item) {
+    if (!item.providers.some(source => source.addon.id === addon.id && source.meta.id === meta.id)) item.providers.push(provider);
+    if (!item.poster && meta.poster) item.poster = meta.poster;
+    return;
+  }
+  addonCatalogItems.push({_kind:"addon",identity,providers:[provider],addon,catalogEntry:entry,meta,id:meta.id,type,title:meta.name || meta.title || meta.id,year:meta.year || "",genre:Array.isArray(meta.genres) ? meta.genres.join("، ") : "",poster:meta.poster || ""});
+}
+
+function render() {
+  const q = normalizeTitle(search.value);
+  const filtered = activeView === "library" ? [] : addonCatalogItems.filter(item => (activeFilter === "all" || item.type === activeFilter || (activeFilter === "series" && item.type === "anime")) && (!q || normalizeTitle([item.title,item.genre,item.year].join(" ")).includes(q)));
   catalog.replaceChildren();
   filtered.forEach(item => {
-    const card = document.createElement("article");
-    card.className = "media-card";
-    card.tabIndex = 0;
-    card.setAttribute("role", "button");
-    card.setAttribute("aria-label", "تفاصيل " + item.title);
-    if (item._kind === "addon") {
-      const posterUrl = safeHttpsUrl(item.poster);
-      if (posterUrl) {
-        const poster = document.createElement("img");
-        poster.className = "poster addon-card-poster";
-        poster.src = posterUrl.href;
-        poster.alt = "";
-        poster.loading = "lazy";
-        poster.referrerPolicy = "no-referrer";
-        card.append(poster);
-      } else {
-        const poster = document.createElement("div");
-        poster.className = "poster";
-        const art = document.createElement("span");
-        art.className = "poster-art";
-        art.textContent = "RAIF";
-        poster.append(art);
-        card.append(poster);
-      }
-    } else {
-      const poster = document.createElement("div");
-      poster.className = "poster";
-      poster.style.setProperty("--c1", item.c1);
-      poster.style.setProperty("--c2", item.c2);
-      const art = document.createElement("span");
-      art.className = "poster-art";
-      art.textContent = item.symbol;
-      poster.append(art);
-      card.append(poster);
-    }
-    const label = document.createElement("span");
-    label.className = "poster-label";
-    label.textContent = [typeNames[item.type] || item.type, item.year].filter(Boolean).join(" · ");
-    const title = document.createElement("div");
-    title.className = "media-title";
-    title.textContent = item.title || "عنوان بدون اسم";
-    const detail = document.createElement("div");
-    detail.className = "media-meta";
-    detail.textContent = [item.genre, typeNames[item.type] || item.type].filter(Boolean).join(" · ");
-    card.append(label, title, detail);
-    card.addEventListener("click", () => {
-      if (item._kind === "addon") openAddonMeta(item.addon, item.catalogEntry, item.meta);
-      else openDetail(item.id);
-    });
-    card.addEventListener("keydown", event => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        card.click();
-      }
-    });
-    catalog.append(card);
+    const card = document.createElement("article"); card.className = "media-card"; card.tabIndex = 0; card.setAttribute("role","button"); card.setAttribute("aria-label","تفاصيل " + item.title);
+    const posterUrl = safeAddonAssetUrl(item.poster, item.addon.manifest_url);
+    if (posterUrl) { const poster = document.createElement("img"); poster.className = "poster addon-card-poster"; poster.src = posterUrl.href; poster.alt = ""; poster.loading = "lazy"; poster.referrerPolicy = "no-referrer"; card.append(poster); }
+    else { const poster = document.createElement("div"); poster.className = "poster"; const art = document.createElement("span"); art.className = "poster-art"; art.textContent = "RAIF"; poster.append(art); card.append(poster); }
+    const label = document.createElement("span"); label.className = "poster-label"; label.textContent = [typeNames[item.type] || item.type,item.year].filter(Boolean).join(" · ");
+    const title = document.createElement("div"); title.className = "media-title"; title.textContent = item.title || "عنوان بدون اسم";
+    const detail = document.createElement("div"); detail.className = "media-meta"; detail.textContent = [item.genre,item.providers.length + " مصدر"].filter(Boolean).join(" · ");
+    card.append(label,title,detail); card.addEventListener("click",() => openAddonMeta(item.addon,item.catalogEntry,item.meta));
+    card.addEventListener("keydown",event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); card.click(); } }); catalog.append(card);
   });
-
-  if (activeView === "library" && !currentUser) {
-    empty.textContent = "سجّل الدخول أولاً لعرض مكتبتك المحفوظة على RAIF.";
-  } else if (activeView === "library" && favoritesLoading) {
-    empty.textContent = "جارٍ تحميل مكتبتك...";
-  } else if (addonCatalogLoading && activeView !== "library") {
-    empty.textContent = "جارٍ تحميل أفلام ومسلسلات المصادر...";
-  } else {
-    empty.textContent = activeView === "library"
-      ? "مكتبتك فارغة حالياً. أضف عناوين من نافذة التفاصيل."
-      : "لم تصل عناوين من الإضافات لهذا القسم بعد. تأكد من تفعيل مصدر يدعم الكتالوج.";
-  }
+  const count = document.querySelector("#catalog-count"); if (count) count.textContent = filtered.length ? filtered.length.toLocaleString("ar") + " عنوان موحّد · " + filtered.reduce((sum,item) => sum + item.providers.length,0).toLocaleString("ar") + " نتائج مصادر" : "";
+  if (activeView === "library" && !currentUser) empty.textContent = "سجّل الدخول أولاً لعرض مكتبتك المحفوظة.";
+  else if (activeView === "library") empty.textContent = "المكتبة المحفوظة ستظهر هنا بعد ربط حفظ عناوين الإضافات.";
+  else if (!currentUser) empty.textContent = "سجّل الدخول أولاً لتحميل كتالوجات مصادرك.";
+  else if (addonCatalogLoading && !filtered.length) empty.textContent = "جارٍ تحميل الكتالوجات من مصادرك… ستظهر النتائج تباعاً.";
+  else if (!filtered.length && addonDiscoveryErrors.length) empty.textContent = "لم تصل عناوين. تعذّر تحميل " + addonDiscoveryErrors.length + " طلباً. افتح مصادري لمعرفة التفاصيل.";
+  else if (!filtered.length) empty.textContent = "لا توجد عناوين من المصادر المفعّلة لهذا القسم.";
+  else empty.textContent = "";
   empty.hidden = filtered.length > 0;
 }
 
