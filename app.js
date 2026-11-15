@@ -7,6 +7,8 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
 const items = [];
 
 let activeFilter = "all";
+let activeGenre = "all";
+let activeSort = "recommended";
 let activeView = "home";
 let currentUser = null;
 const SHARED_ACCOUNT_EMAIL = "raif-shared@puhipyjljmbvczijtzkb.supabase.co";
@@ -128,12 +130,47 @@ function mergeCatalogMeta(addon, entry, meta) {
   addonCatalogItems.push({_kind:"addon",identity,providers:[provider],addon,catalogEntry:entry,meta,id:meta.id,type,title:meta.name || meta.title || meta.id,year:meta.year || "",genre:Array.isArray(meta.genres) ? meta.genres.join("، ") : "",poster:meta.poster || ""});
 }
 
+function getItemGenres(item) {
+  const raw = Array.isArray(item?.meta?.genres) ? item.meta.genres : (typeof item?.genre === "string" ? item.genre.split(/[،,]/) : []);
+  return [...new Set(raw.map(value => String(value || "").trim()).filter(Boolean))];
+}
+
+function renderGenreFilters(items) {
+  const host = document.querySelector("#genre-filters");
+  if (!host) return;
+  const known = new Map();
+  items.forEach(item => getItemGenres(item).forEach(genre => {
+    const key = normalizeTitle(genre);
+    if (key && !known.has(key)) known.set(key, genre);
+  }));
+  if (activeGenre !== "all" && !known.has(activeGenre)) activeGenre = "all";
+  host.replaceChildren();
+  const choices = [["all", "كل التصنيفات"], ...[...known.entries()].sort((a,b) => a[1].localeCompare(b[1], "ar")).map(([key,label]) => [key,label])];
+  choices.forEach(([key,label]) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "genre-chip" + (activeGenre === key ? " active" : "");
+    button.textContent = label;
+    button.setAttribute("aria-pressed", String(activeGenre === key));
+    button.addEventListener("click", () => { activeGenre = key; render(); });
+    host.append(button);
+  });
+  host.hidden = known.size === 0;
+}
+
 function render() {
   const q=normalizeTitle(search.value);
-  let filtered=addonCatalogItems.filter(item=>(activeFilter==="all"||item.type===activeFilter||(activeFilter==="series"&&item.type==="anime"))&&(!q||normalizeTitle([item.title,item.genre,item.year].join(" ")).includes(q)));
+  let filtered=addonCatalogItems.filter(item=>(activeFilter==="all"||item.type===activeFilter)&&(!q||normalizeTitle([item.title,item.genre,item.year].join(" ")).includes(q)));
   if(activeView==="library")filtered=filtered.filter(item=>savedIds.includes(item.identity));
   if(activeView==="watched")filtered=filtered.filter(item=>isTitleWatched(item));
   if(activeView==="progress")filtered=filtered.filter(item=>item.type!=="movie"&&getEpisodeWatchCount(item.identity)>0);
+  renderGenreFilters(filtered);
+  if(activeGenre !== "all") filtered=filtered.filter(item=>getItemGenres(item).some(genre=>normalizeTitle(genre)===activeGenre));
+  if(activeSort==="latest"||activeSort==="oldest") filtered.sort((a,b)=>{
+    const ay=Number.parseInt(a.year,10)||0, by=Number.parseInt(b.year,10)||0;
+    return activeSort==="latest" ? by-ay : ay-by;
+  });
+  else if(activeSort==="title") filtered.sort((a,b)=>(a.title||"").localeCompare(b.title||"","ar"));
   catalog.replaceChildren();
   filtered.forEach(item=>{
     const card=document.createElement("article");card.className="media-card";card.tabIndex=0;card.setAttribute("role","button");card.setAttribute("aria-label","تفاصيل "+item.title);
@@ -1273,9 +1310,15 @@ document.querySelector("#source-import-button").addEventListener("click", async 
 
 document.querySelectorAll(".filter").forEach(button => button.addEventListener("click", () => {
   activeFilter = button.dataset.filter;
+  activeGenre = "all";
   document.querySelectorAll(".filter").forEach(entry => entry.classList.toggle("active", entry === button));
   render();
 }));
+
+document.querySelector("#catalog-sort")?.addEventListener("change", event => {
+  activeSort = event.target.value;
+  render();
+});
 
 search.addEventListener("input", render);
 document.querySelector("#refresh-catalog")?.addEventListener("click", () => {
@@ -1299,6 +1342,7 @@ document.querySelectorAll(".nav-item").forEach(button => button.addEventListener
   activeView = button.dataset.view;
   const map = {home:"all",movies:"movie",series:"series",anime:"anime",library:"all",watched:"all",progress:"all"};
   activeFilter = map[activeView] || "all";
+  activeGenre = "all";
   document.querySelectorAll(".nav-item").forEach(entry => entry.classList.toggle("active", entry === button));
   document.querySelectorAll(".filter").forEach(entry => entry.classList.toggle("active", entry.dataset.filter === activeFilter));
   const isSources = activeView === "sources";
