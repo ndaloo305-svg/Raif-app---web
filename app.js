@@ -778,13 +778,13 @@ function subtitleToVtt(raw) {
   return "WEBVTT\n\n" + value;
 }
 
-async function fetchSubtitleFile(subtitle, catalogEntry, meta) {
+async function fetchSubtitleFile(subtitle, catalogEntry, meta, selectedVideoId = null) {
   const {data, error} = await supabase.functions.invoke("raif-addon-proxy", {
     body: {
       action:"subtitle_file",
       addon_id:subtitle.addonId,
       type:catalogEntry.type,
-      content_id:meta.id,
+      content_id:selectedVideoId || meta.id,
       subtitle_url:subtitle.url
     }
   });
@@ -794,14 +794,18 @@ async function fetchSubtitleFile(subtitle, catalogEntry, meta) {
   return URL.createObjectURL(new Blob([vtt], {type:"text/vtt;charset=utf-8"}));
 }
 
-async function findSubtitles(meta, catalogEntry, area, button) {
+async function findSubtitles(meta, catalogEntry, area, button, selectedVideoId = null) {
   area.replaceChildren();
   button.disabled = true;
   button.textContent = "جارٍ البحث عن الترجمات...";
-  const candidates = addons.filter(addon => addon.enabled && (
-    (Array.isArray(addon.config?.resources) && addon.config.resources.includes("subtitles")) ||
-    /subtito|subsource|subdl|submaker|opensubtitles/i.test(addon.name || "")
-  ));
+  const candidates = addons.filter(addon => {
+    if (!addon.enabled) return false;
+    const manifest = addonManifestCache.get(addon.id);
+    const resources = Array.isArray(manifest?.resources)
+      ? manifest.resources.map(resource => typeof resource === "string" ? resource : resource?.name)
+      : (Array.isArray(addon.config?.resources) ? addon.config.resources : []);
+    return resources.includes("subtitles") || /subtito|subsource|subdl|submaker|opensubtitles/i.test(addon.name || "");
+  });
   if (!candidates.length) {
     const note = document.createElement("p");
     note.textContent = "لم يتم إعداد أي مصدر ترجمات بعد. أضف Subtito أو SubSource أو SubDL أو OpenSubtitles.";
@@ -811,7 +815,7 @@ async function findSubtitles(meta, catalogEntry, area, button) {
     return;
   }
   const results = await Promise.allSettled(candidates.map(async addon => {
-    const data = await fetchAddonResource(addon, "subtitles", catalogEntry.type, meta.id);
+    const data = await withAddonTimeout(fetchAddonResource(addon, "subtitles", catalogEntry.type, selectedVideoId || meta.id), "ترجمات " + (addon.name || addon.addon_id), 12000);
     return (Array.isArray(data?.subtitles) ? data.subtitles : [])
       .filter(entry => typeof entry?.url === "string" && safeHttpsUrl(entry.url))
       .map(entry => ({
@@ -838,7 +842,7 @@ async function findSubtitles(meta, catalogEntry, area, button) {
         choose.disabled = true;
         choose.textContent = "جارٍ تحميل الترجمة...";
         try {
-          const objectUrl = await fetchSubtitleFile(subtitle, catalogEntry, meta);
+          const objectUrl = await fetchSubtitleFile(subtitle, catalogEntry, meta, selectedVideoId);
           setSelectedSubtitle({objectUrl, label:subtitle.label, language:subtitle.language});
           choose.textContent = "✓ " + (subtitle.label || "تم اختيار الترجمة");
           area.querySelectorAll("button").forEach(item => { if (item !== choose) item.disabled = true; });
@@ -1138,7 +1142,7 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
     subtitleButton.textContent = "البحث عن الترجمات";
     const subtitleArea = document.createElement("div");
     subtitleArea.className = "addon-subtitle-list";
-    subtitleButton.addEventListener("click", () => findSubtitles(meta, catalogEntry, subtitleArea, subtitleButton));
+    subtitleButton.addEventListener("click", () => findSubtitles(meta, catalogEntry, subtitleArea, subtitleButton, selectedVideoId));
     content.append(subtitleButton, subtitleArea);
 
     const favoriteButton = document.createElement("button");
@@ -1199,9 +1203,15 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
         // Catalog/metadata add-ons are often separate from stream-provider add-ons.
         // Query every enabled add-on that actually declares the stream resource.
         const providers = addons.filter(candidate => candidate.enabled);
+        const sourceProgress = document.createElement("p");
+        sourceProgress.className = "source-fetch-progress";
+        sourceProgress.textContent = "يتم فحص " + providers.length + " إضافة مفعّلة؛ يجري استبعاد الإضافات التي لا تعلن مورد تشغيل.";
+        streamsArea.append(sourceProgress);
+        let completedProviders = 0;
         const settled = await Promise.allSettled(providers.map(async candidate => {
           const manifest = addonManifestCache.get(candidate.id) ||
             await withAddonTimeout(fetchAddonResource(candidate, "manifest"), "Manifest · " + (candidate.name || candidate.addon_id));
+          addonManifestCache.set(candidate.id, manifest);
           const resources = Array.isArray(manifest?.resources) ? manifest.resources.map(resource =>
             typeof resource === "string" ? resource : resource?.name
           ) : [];
@@ -1213,8 +1223,17 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
           );
           return (Array.isArray(streamData?.streams) ? streamData.streams : [])
             .map(stream => ({...stream, _raifProviderName:candidate.name || candidate.addon_id}));
-        }));
-        const failedProviders = settled.filter(result => result.status === "rejected").length;
+        }).map(promise => promise.then(value => {
+          completedProviders++;
+          sourceProgress.textContent = "تم فحص " + completedProviders + " من " + providers.length + " إضافة...";
+          return value;
+        }).catch(error => {
+          completedProviders++;
+          sourceProgress.textContent = "تم فحص " + completedProviders + " من " + providers.length + " إضافة...";
+          throw error;
+        })));
+        const failedResults = settled.filter(result => result.status === "rejected");
+        const failedProviders = failedResults.length;
         const rawStreams = settled.flatMap(result => result.status === "fulfilled" ? result.value : []);
         const streams = rawStreams.filter(stream => {
           const streamLabel = [stream?.name, stream?.title, stream?.description].filter(Boolean).join(" ");
@@ -1293,6 +1312,20 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
               ? "المصادر أعادت روابط غير مباشرة أو غير مدعومة في مشغل الويب."
               : "لم تُرجع إضافات البث المفعّلة روابط لهذا العنوان.";
           streamsArea.append(note);
+        }
+        sourceProgress.textContent = "اكتمل الفحص: " + providers.length + " إضافة، " + streams.length + " مصدر تشغيل فريد.";
+        if (failedResults.length) {
+          const errors = document.createElement("details");
+          const summary = document.createElement("summary");
+          summary.textContent = "تفاصيل تعذر الوصول إلى " + failedProviders + " إضافة";
+          errors.append(summary);
+          failedResults.forEach(result => {
+            const item = document.createElement("small");
+            item.className = "is-error";
+            item.textContent = result.reason?.message || "تعذر الاتصال بمصدر.";
+            errors.append(item);
+          });
+          streamsArea.append(errors);
         }
         streams.forEach((stream, index) => {
           const row = document.createElement("article");
