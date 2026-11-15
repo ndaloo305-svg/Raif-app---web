@@ -343,7 +343,8 @@ async function invokeAddonProxy(body, label = "المصدر") {
 }
 
 function fetchAddonResource(addon, resource, type, contentId, query = {}) {
-  return invokeAddonProxy({
+  if (resource === "manifest" && addonManifestCache.has(addon.id)) return addonManifestCache.get(addon.id);
+  const request = invokeAddonProxy({
     action: resource === "manifest" ? "manifest" : "resource",
     addon_id: addon.id,
     resource,
@@ -351,6 +352,12 @@ function fetchAddonResource(addon, resource, type, contentId, query = {}) {
     content_id: contentId,
     query
   }, resource === "manifest" ? "Manifest" : resource);
+  if (resource === "manifest") {
+    const cached = request.catch(error => { addonManifestCache.delete(addon.id); throw error; });
+    addonManifestCache.set(addon.id, cached);
+    return cached;
+  }
+  return request;
 }
 
 function fetchAddonManifestByUrl(manifestUrl) {
