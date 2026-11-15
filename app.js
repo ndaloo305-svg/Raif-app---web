@@ -1139,6 +1139,8 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
       episodeSelect.addEventListener("change", () => {
         selectedVideoId = episodeSelect.value || null;
         streamsArea.replaceChildren();
+        availableStreams = [];
+        bestButton.hidden = true;
         streamsButton.textContent = "عرض مصادر تشغيل الحلقة";
       });
       content.append(episodeLabel, episodeSelect);
@@ -1207,6 +1209,8 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
       streamsButton.disabled = true;
       streamsButton.textContent = "جارٍ البحث عن المصادر...";
       streamsArea.replaceChildren();
+      availableStreams = [];
+      bestButton.hidden = true;
       try {
         // Catalog/metadata add-ons are often separate from stream-provider add-ons.
         // Query every enabled add-on that actually declares the stream resource.
