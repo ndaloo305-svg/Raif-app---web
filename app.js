@@ -4,14 +4,7 @@ const SUPABASE_URL = "https://puhipyjljmbvczijtzkb.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_cfCNLzoEfFSf5mLwunrmCw_qDdyWIo7";
 const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
 
-const items = [
- {id:1,title:"رحلة إلى المجهول",type:"movie",year:"2025",genre:"مغامرة",symbol:"✧",c1:"#4d3b35",c2:"#171c2b",description:"عنوان تجريبي لعرض شكل بطاقة المحتوى وتفاصيلها داخل واجهة RAIF."},
- {id:2,title:"مدينة الظلال",type:"series",year:"2024",genre:"دراما",symbol:"◈",c1:"#273d4a",c2:"#151a25",description:"بيانات تجريبية فقط. لم يتم ربط أي مزود محتوى أو مصدر بث بعد."},
- {id:3,title:"آخر المحاربين",type:"anime",year:"2025",genre:"أنمي",symbol:"武",c1:"#6b3e35",c2:"#241923",description:"بطاقة أنمي تجريبية لا تمثل عملاً حقيقياً أو رابط مشاهدة."},
- {id:4,title:"ما وراء النجوم",type:"movie",year:"2023",genre:"خيال علمي",symbol:"✦",c1:"#334b63",c2:"#17192b",description:"مساحة مخصصة مستقبلاً لبيانات TMDB أو مصدر بيانات تختاره."},
- {id:5,title:"ملفات سرية",type:"series",year:"2025",genre:"تشويق",symbol:"⌁",c1:"#51433a",c2:"#1b1b22",description:"سيتم لاحقاً توصيل صفحة التفاصيل بمصادر المحتوى المتاحة."},
- {id:6,title:"أفق جديد",type:"anime",year:"2024",genre:"خيال",symbol:"星",c1:"#66513b",c2:"#202238",description:"هذا المحتوى الوهمي موجود لاختبار العرض والبحث والتصفية فقط."}
-];
+const items = []; // Real catalog data only; no demo titles.
 
 let activeFilter = "all";
 let activeView = "home";
@@ -23,6 +16,8 @@ let addons = [];
 let addonCatalogItems = [];
 let addonCatalogLoading = false;
 const addonDiscoveryCache = new Set();
+const addonManifestCache = new Map();
+const addonLoadErrors = new Map();
 
 const catalog = document.querySelector("#catalog");
 const search = document.querySelector("#search");
@@ -120,6 +115,12 @@ function render() {
     detail.className = "media-meta";
     detail.textContent = [item.genre, typeNames[item.type] || item.type].filter(Boolean).join(" · ");
     card.append(label, title, detail);
+    if (item._kind === "addon" && item._raifProviders?.length > 1) {
+      const sources = document.createElement("div");
+      sources.className = "media-sources-count";
+      sources.textContent = item._raifProviders.length + " مصادر متاحة";
+      card.append(sources);
+    }
     card.addEventListener("click", () => {
       if (item._kind === "addon") openAddonMeta(item.addon, item.catalogEntry, item.meta);
       else openDetail(item.id);
@@ -140,9 +141,12 @@ function render() {
   } else if (addonCatalogLoading && activeView !== "library") {
     empty.textContent = "جارٍ تحميل أفلام ومسلسلات المصادر...";
   } else {
+    const failures = addonLoadErrors.size;
     empty.textContent = activeView === "library"
-      ? "مكتبتك فارغة حالياً. أضف عناوين من نافذة التفاصيل."
-      : "لم تصل عناوين من الإضافات لهذا القسم بعد. تأكد من تفعيل مصدر يدعم الكتالوج.";
+      ? "مكتبتك فارغة حالياً. أضف عناوين حقيقية من كتالوجات RAIF."
+      : failures
+        ? "لم تصل نتائج من بعض المصادر (" + failures + "). افتح «مصادري» لمراجعة تفاصيل الأخطاء."
+        : "لا توجد عناوين حقيقية في هذا القسم حتى الآن. أضف أو فعّل مصدرًا يوفّر كتالوجًا.";
   }
   empty.hidden = filtered.length > 0;
 }
@@ -397,52 +401,112 @@ function fetchAddonManifestByUrl(manifestUrl) {
   return invokeAddonProxy({action:"inspect_url", manifest_url:manifestUrl}, "Manifest");
 }
 
+function normalizeCatalogTitle(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u064B-\u065F\u0670\u06D6-\u06ED]/g, "")
+    .replace(/[أإآٱ]/g, "ا")
+    .replace(/ى/g, "ي")
+    .replace(/ة/g, "ه")
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function catalogIdentity(meta, type) {
+  const ids = [meta?.imdb_id, meta?.imdbId, meta?.id]
+    .filter(value => typeof value === "string")
+    .map(value => value.trim().toLowerCase());
+  const imdb = ids.find(value => /^tt\d{5,12}(?::\d+:\d+)?$/.test(value));
+  if (imdb) return type + "|imdb|" + imdb.split(":")[0];
+  const tmdb = ids.find(value => /^(?:tmdb:|tmdb\/|movie:|tv:)?\d{2,12}$/.test(value));
+  if (tmdb) return type + "|id|" + tmdb.replace(/^(?:tmdb:|tmdb\/|movie:|tv:)/, "");
+  const title = normalizeCatalogTitle(meta?.name || meta?.title);
+  const year = String(meta?.year || "").match(/\d{4}/)?.[0] || "";
+  return title ? type + "|title|" + title + "|" + year : "";
+}
+
+function withAddonTimeout(promise, label, timeoutMs = 11000) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error("انتهت مهلة انتظار " + label + " (11 ثانية).")), timeoutMs);
+    })
+  ]).finally(() => clearTimeout(timer));
+}
+
 async function loadAddonDiscovery(view = activeView) {
   if (!currentUser || view === "library" || view === "sources") return;
   const wanted = view === "movies" ? ["movie"] :
     view === "series" ? ["series"] :
     view === "anime" ? ["anime", "series"] : ["movie", "series", "anime"];
   const enabled = addons.filter(addon => addon.enabled);
-  if (!enabled.length) { render(); return; }
   addonCatalogLoading = true;
+  addonLoadErrors.clear();
   render();
-  try {
-    await Promise.all(enabled.map(async addon => {
-      try {
-        const manifest = await fetchAddonResource(addon, "manifest");
-        const catalogs = Array.isArray(manifest?.catalogs) ? manifest.catalogs : [];
-        await Promise.all(catalogs.filter(entry => entry?.id && wanted.includes(entry.type))
-          .map(async entry => {
-            const key = addon.id + "|" + entry.type + "|" + entry.id;
-            if (addonDiscoveryCache.has(key)) return;
-            addonDiscoveryCache.add(key);
-            try {
-              const data = await fetchAddonResource(addon, "catalog", entry.type, entry.id, {skip:0});
-              const metas = Array.isArray(data?.metas) ? data.metas : [];
-              metas.forEach(meta => {
-                if (!meta || !meta.id) return;
-                const type = entry.type === "anime" ? "anime" : entry.type;
-                const identity = addon.id + "|" + type + "|" + meta.id;
-                if (addonCatalogItems.some(item => item.identity === identity)) return;
-                addonCatalogItems.push({
-                  _kind:"addon", identity, addon, catalogEntry:entry, meta,
-                  id:meta.id, type, title:meta.name || meta.id,
-                  year:meta.year || "", genre:Array.isArray(meta.genres) ? meta.genres.join("، ") : "",
-                  poster:meta.poster || ""
-                });
-              });
-            } catch (error) {
-              console.warn("RAIF catalog load failed:", addon.name, entry.id, error);
-            }
-          }));
-      } catch (error) {
-        console.warn("RAIF manifest load failed:", addon.name, error);
-      }
-    }));
-  } finally {
+  if (!enabled.length) {
     addonCatalogLoading = false;
     render();
+    return;
   }
+
+  const jobs = enabled.map(async addon => {
+    try {
+      const manifest = addonManifestCache.get(addon.id) ||
+        await withAddonTimeout(fetchAddonResource(addon, "manifest"), "Manifest · " + (addon.name || addon.addon_id));
+      addonManifestCache.set(addon.id, manifest);
+      const catalogs = Array.isArray(manifest?.catalogs) ? manifest.catalogs : [];
+      const entries = catalogs.filter(entry => entry?.id && wanted.includes(entry.type));
+      if (!entries.length) return;
+
+      await Promise.all(entries.map(async entry => {
+        const key = addon.id + "|" + entry.type + "|" + entry.id;
+        if (addonDiscoveryCache.has(key)) return;
+        try {
+          const data = await withAddonTimeout(
+            fetchAddonResource(addon, "catalog", entry.type, entry.id, {skip:0}),
+            "كتالوج " + (entry.name || entry.id)
+          );
+          addonDiscoveryCache.add(key);
+          const metas = Array.isArray(data?.metas) ? data.metas : [];
+          metas.forEach(meta => {
+            if (!meta || !meta.id) return;
+            const type = entry.type === "anime" ? "anime" : entry.type;
+            const identity = catalogIdentity(meta, type) || type + "|source|" + addon.id + "|" + meta.id;
+            const existing = addonCatalogItems.find(item => item.identity === identity);
+            const provider = {addon, catalogEntry:entry, metaId:meta.id, catalogName:entry.name || entry.id};
+            if (existing) {
+              if (!existing._raifProviders.some(item => item.addon.id === addon.id && item.metaId === meta.id)) {
+                existing._raifProviders.push(provider);
+              }
+              if (!existing.poster && meta.poster) existing.poster = meta.poster;
+              if (!existing.year && meta.year) existing.year = meta.year;
+              return;
+            }
+            addonCatalogItems.push({
+              _kind:"addon", identity, addon, catalogEntry:entry, meta,
+              _raifProviders:[provider],
+              id:meta.id, type, title:meta.name || meta.id,
+              year:meta.year || "",
+              genre:Array.isArray(meta.genres) ? meta.genres.join("، ") : "",
+              poster:meta.poster || ""
+            });
+          });
+          render();
+        } catch (error) {
+          addonLoadErrors.set(addon.id + "|" + entry.id, {name:addon.name || addon.addon_id, message:error.message});
+        }
+      }));
+    } catch (error) {
+      addonLoadErrors.set(addon.id, {name:addon.name || addon.addon_id, message:error.message});
+    }
+  });
+
+  await Promise.allSettled(jobs);
+  addonCatalogLoading = false;
+  render();
 }
 
 function renderAddonMessage(message, isError = false) {
