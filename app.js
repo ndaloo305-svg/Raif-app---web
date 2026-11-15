@@ -1456,6 +1456,8 @@ supabase.auth.onAuthStateChange((_event, session) => {
   Promise.resolve().then(async () => { await loadFavorites(); if (activeView === "sources") await loadSources(); });
 });
 
+window.addEventListener("online", () => { if (currentUser) void loadWatchHistory(); });
+
 let { data: { session } } = await supabase.auth.getSession();
 if (session?.user?.email?.toLowerCase() !== SHARED_ACCOUNT_EMAIL) {
   await supabase.auth.signOut({ scope: "local" });
