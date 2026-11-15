@@ -152,7 +152,9 @@ function render() {
     catalog.append(card);
   });
 
-  if (activeView === "library" && !currentUser) {
+  if (!currentUser && activeView !== "library") {
+    empty.textContent = "سجّل الدخول أولاً حتى يجمع RAIF كتالوجات مصادر حسابك.";
+  } else if (activeView === "library" && !currentUser) {
     empty.textContent = "سجّل الدخول أولاً لعرض مكتبتك المحفوظة على RAIF.";
   } else if (activeView === "library" && favoritesLoading) {
     empty.textContent = "جارٍ تحميل مكتبتك...";
@@ -171,9 +173,11 @@ function render() {
   if (catalogSummary) {
     const sourceCount = new Set(filtered.flatMap(item => (item._raifProviders || [{addon:item.addon}])
       .map(provider => provider?.addon?.id).filter(Boolean))).size;
-    catalogSummary.textContent = filtered.length
-      ? "يعرض RAIF " + filtered.length + " عنوانًا حقيقيًا" + (sourceCount ? " من " + sourceCount + " مصدرًا." : ".")
-      : (addonCatalogLoading ? "جارٍ جلب الكتالوجات من المصادر المفعّلة..." : "لا توجد عناوين حقيقية للعرض حاليًا.");
+    catalogSummary.textContent = !currentUser
+      ? "سجّل الدخول لعرض الكتالوجات الحقيقية من مصادر حسابك."
+      : filtered.length
+        ? "يعرض RAIF " + filtered.length + " عنوانًا حقيقيًا" + (sourceCount ? " من " + sourceCount + " مصدرًا." : ".")
+        : (addonCatalogLoading ? "جارٍ جلب الكتالوجات من المصادر المفعّلة..." : "لا توجد عناوين حقيقية للعرض حاليًا.");
   }
 }
 
@@ -977,16 +981,17 @@ async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}, prog
     resolvePlayback();
   };
   const failPlayback = message => {
+    if (playbackSettled) return;
     status.textContent = message;
     status.classList.add("is-error");
     recordStreamHealth(target.href, false);
-    if (playbackSettled) return;
     playbackSettled = true;
     clearTimeout(playbackTimeout);
     rejectPlayback(new Error(message));
   };
   video.onerror = () => failPlayback("تعذر تشغيل الرابط. قد يكون منتهيًا أو يتطلب CORS أو ترويسات لا يدعمها المتصفح.");
   video.onplaying = () => {
+    if (playbackSettled) return;
     status.textContent = "يتم التشغيل داخل RAIF.";
     status.classList.remove("is-error");
     recordStreamHealth(target.href, true);
@@ -1235,14 +1240,15 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
           );
           return (Array.isArray(streamData?.streams) ? streamData.streams : [])
             .map(stream => ({...stream, _raifProviderName:candidate.name || candidate.addon_id}));
-        }).map(promise => promise.then(value => {
+        }).map((promise, index) => promise.then(value => {
           completedProviders++;
           sourceProgress.textContent = "تم فحص " + completedProviders + " من " + providers.length + " إضافة...";
           return value;
         }).catch(error => {
           completedProviders++;
           sourceProgress.textContent = "تم فحص " + completedProviders + " من " + providers.length + " إضافة...";
-          throw error;
+          const providerName = providers[index]?.name || providers[index]?.addon_id || "مصدر غير معروف";
+          throw new Error(providerName + ": " + (error?.message || "تعذر الاتصال."));
         })));
         const failedResults = settled.filter(result => result.status === "rejected");
         const failedProviders = failedResults.length;
