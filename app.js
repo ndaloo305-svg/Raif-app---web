@@ -395,7 +395,7 @@ async function loadAddonDiscovery(view = activeView) {
           try {
             const data=await withTimeout(fetchAddonResource(addon,"catalog",entry.type,entry.id,{skip:0}),"كتالوج " + (entry.name || entry.id));
             (Array.isArray(data?.metas) ? data.metas : []).forEach(meta => mergeCatalogMeta(addon,entry,meta));
-            if (run === addonDiscoveryRun) render();
+            render();
           } catch(error) {
             addonDiscoveryCache.delete(key);
             addonDiscoveryErrors.push({addon:addon.name || addon.addon_id,catalog:entry.name || entry.id,message:error.message});
