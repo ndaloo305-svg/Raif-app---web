@@ -20,6 +20,9 @@ const SHARED_ACCOUNT_EMAIL = "raif-shared@puhipyjljmbvczijtzkb.supabase.co";
 let savedIds = [];
 let favoritesLoading = false;
 let addons = [];
+let addonCatalogItems = [];
+let addonCatalogLoading = false;
+const addonDiscoveryCache = new Set();
 
 const catalog = document.querySelector("#catalog");
 const search = document.querySelector("#search");
@@ -58,43 +61,90 @@ function itemContentType(item) {
 
 function render() {
   const q = search.value.trim().toLocaleLowerCase("ar");
-  const filtered = items.filter(item =>
+  const matches = (item) =>
     (activeFilter === "all" || item.type === activeFilter) &&
-    (activeView !== "library" || savedIds.includes(item.id)) &&
-    (item.title.toLocaleLowerCase("ar").includes(q) ||
-      item.genre.toLocaleLowerCase("ar").includes(q))
-  );
+    (activeView !== "library" || (item._kind === "demo" && savedIds.includes(item.id))) &&
+    ((item.title || "").toLocaleLowerCase("ar").includes(q) ||
+      (item.genre || "").toLocaleLowerCase("ar").includes(q));
+  const addonMatches = addonCatalogItems
+    .filter(item => activeView !== "library" && matches(item));
+  const demoMatches = addonMatches.length
+    ? []
+    : items.map(item => ({...item, _kind:"demo"})).filter(matches);
+  const filtered = [...addonMatches, ...demoMatches];
 
-  catalog.innerHTML = filtered.map(item => `
-    <article class="media-card" tabindex="0" role="button" data-id="${item.id}" aria-label="تفاصيل ${item.title}">
-      <div class="poster" style="--c1:${item.c1};--c2:${item.c2}">
-        <span class="poster-art">${item.symbol}</span>
-        <span class="poster-label">${typeNames[item.type]} · ${item.year}</span>
-      </div>
-      <div class="media-title">${item.title}</div>
-      <div class="media-meta">${item.genre} · ${typeNames[item.type]}</div>
-    </article>
-  `).join("");
+  catalog.replaceChildren();
+  filtered.forEach(item => {
+    const card = document.createElement("article");
+    card.className = "media-card";
+    card.tabIndex = 0;
+    card.setAttribute("role", "button");
+    card.setAttribute("aria-label", "تفاصيل " + item.title);
+    if (item._kind === "addon") {
+      const posterUrl = safeHttpsUrl(item.poster);
+      if (posterUrl) {
+        const poster = document.createElement("img");
+        poster.className = "poster addon-card-poster";
+        poster.src = posterUrl.href;
+        poster.alt = "";
+        poster.loading = "lazy";
+        poster.referrerPolicy = "no-referrer";
+        card.append(poster);
+      } else {
+        const poster = document.createElement("div");
+        poster.className = "poster";
+        const art = document.createElement("span");
+        art.className = "poster-art";
+        art.textContent = "RAIF";
+        poster.append(art);
+        card.append(poster);
+      }
+    } else {
+      const poster = document.createElement("div");
+      poster.className = "poster";
+      poster.style.setProperty("--c1", item.c1);
+      poster.style.setProperty("--c2", item.c2);
+      const art = document.createElement("span");
+      art.className = "poster-art";
+      art.textContent = item.symbol;
+      poster.append(art);
+      card.append(poster);
+    }
+    const label = document.createElement("span");
+    label.className = "poster-label";
+    label.textContent = [typeNames[item.type] || item.type, item.year].filter(Boolean).join(" · ");
+    const title = document.createElement("div");
+    title.className = "media-title";
+    title.textContent = item.title || "عنوان بدون اسم";
+    const detail = document.createElement("div");
+    detail.className = "media-meta";
+    detail.textContent = [item.genre, typeNames[item.type] || item.type].filter(Boolean).join(" · ");
+    card.append(label, title, detail);
+    card.addEventListener("click", () => {
+      if (item._kind === "addon") openAddonMeta(item.addon, item.catalogEntry, item.meta);
+      else openDetail(item.id);
+    });
+    card.addEventListener("keydown", event => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        card.click();
+      }
+    });
+    catalog.append(card);
+  });
 
   if (activeView === "library" && !currentUser) {
     empty.textContent = "سجّل الدخول أولاً لعرض مكتبتك المحفوظة على RAIF.";
   } else if (activeView === "library" && favoritesLoading) {
     empty.textContent = "جارٍ تحميل مكتبتك...";
+  } else if (addonCatalogLoading && activeView !== "library") {
+    empty.textContent = "جارٍ تحميل أفلام ومسلسلات المصادر...";
   } else {
     empty.textContent = activeView === "library"
       ? "مكتبتك فارغة حالياً. أضف عناوين من نافذة التفاصيل."
-      : "لا توجد نتائج مطابقة. جرّب كلمة بحث أخرى.";
+      : "لم تصل عناوين من الإضافات لهذا القسم بعد. تأكد من تفعيل مصدر يدعم الكتالوج.";
   }
   empty.hidden = filtered.length > 0;
-  catalog.querySelectorAll(".media-card").forEach(card => {
-    card.addEventListener("click", () => openDetail(Number(card.dataset.id)));
-    card.addEventListener("keydown", event => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        openDetail(Number(card.dataset.id));
-      }
-    });
-  });
 }
 
 async function loadFavorites() {
@@ -345,6 +395,54 @@ function fetchAddonResource(addon, resource, type, contentId, query = {}) {
 
 function fetchAddonManifestByUrl(manifestUrl) {
   return invokeAddonProxy({action:"inspect_url", manifest_url:manifestUrl}, "Manifest");
+}
+
+async function loadAddonDiscovery(view = activeView) {
+  if (!currentUser || view === "library" || view === "sources") return;
+  const wanted = view === "movies" ? ["movie"] :
+    view === "series" ? ["series"] :
+    view === "anime" ? ["anime", "series"] : ["movie", "series", "anime"];
+  const enabled = addons.filter(addon => addon.enabled);
+  if (!enabled.length) { render(); return; }
+  addonCatalogLoading = true;
+  render();
+  try {
+    await Promise.all(enabled.map(async addon => {
+      try {
+        const manifest = await fetchAddonResource(addon, "manifest");
+        const catalogs = Array.isArray(manifest?.catalogs) ? manifest.catalogs : [];
+        await Promise.all(catalogs.filter(entry => entry?.id && wanted.includes(entry.type))
+          .map(async entry => {
+            const key = addon.id + "|" + entry.type + "|" + entry.id;
+            if (addonDiscoveryCache.has(key)) return;
+            addonDiscoveryCache.add(key);
+            try {
+              const data = await fetchAddonResource(addon, "catalog", entry.type, entry.id, {skip:0});
+              const metas = Array.isArray(data?.metas) ? data.metas : [];
+              metas.forEach(meta => {
+                if (!meta || !meta.id) return;
+                const type = entry.type === "anime" ? "anime" : entry.type;
+                const identity = addon.id + "|" + type + "|" + meta.id;
+                if (addonCatalogItems.some(item => item.identity === identity)) return;
+                addonCatalogItems.push({
+                  _kind:"addon", identity, addon, catalogEntry:entry, meta,
+                  id:meta.id, type, title:meta.name || meta.id,
+                  year:meta.year || "", genre:Array.isArray(meta.genres) ? meta.genres.join("، ") : "",
+                  poster:meta.poster || ""
+                });
+              });
+            } catch (error) {
+              console.warn("RAIF catalog load failed:", addon.name, entry.id, error);
+            }
+          }));
+      } catch (error) {
+        console.warn("RAIF manifest load failed:", addon.name, error);
+      }
+    }));
+  } finally {
+    addonCatalogLoading = false;
+    render();
+  }
 }
 
 function renderAddonMessage(message, isError = false) {
@@ -1069,6 +1167,7 @@ document.querySelectorAll(".nav-item").forEach(button => button.addEventListener
     document.querySelector("#section-title").textContent =
       ({home:"اكتشف المحتوى",movies:"الأفلام",series:"المسلسلات",anime:"الأنمي",library:"مكتبتي"})[activeView];
     render();
+    if (activeView !== "library") loadAddonDiscovery(activeView);
   } else {
     loadSources();
   }
@@ -1111,8 +1210,9 @@ document.querySelector("#access-code-form").addEventListener("submit", async eve
     currentUser = authData.user || authData.session?.user || null;
     updateAuthView();
     await loadFavorites();
+    await loadSources();
     render();
-    if (activeView === "sources") await loadSources();
+    if (activeView !== "library" && activeView !== "sources") await loadAddonDiscovery(activeView);
     setStatus(accountStatus, "تم الدخول إلى حساب RAIF المشترك.");
     authDialog.close();
   } catch (error) {
@@ -1150,5 +1250,6 @@ if (session?.user?.email?.toLowerCase() !== SHARED_ACCOUNT_EMAIL) {
 currentUser = session?.user || null;
 updateAuthView();
 await loadFavorites();
+await loadSources();
 render();
-if (activeView === "sources") await loadSources();
+if (activeView !== "library" && activeView !== "sources") await loadAddonDiscovery(activeView);
