@@ -4,8 +4,6 @@ const SUPABASE_URL = "https://puhipyjljmbvczijtzkb.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_cfCNLzoEfFSf5mLwunrmCw_qDdyWIo7";
 const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
 
-const items = []; // Real catalog data only; no demo titles.
-
 let activeFilter = "all";
 let activeView = "home";
 let currentUser = null;
@@ -327,7 +325,11 @@ async function loadSources() {
     const name = document.createElement("strong");
     name.textContent = addon.name || addon.addon_id;
     const url = document.createElement("span");
-    url.textContent = addon.manifest_url;
+    try {
+      const manifestDisplayUrl = new URL(addon.manifest_url);
+      url.textContent = manifestDisplayUrl.origin + manifestDisplayUrl.pathname +
+        (manifestDisplayUrl.search ? " · إعدادات محفوظة" : "");
+    } catch { url.textContent = "رابط Manifest غير صالح"; }
     details.append(name, url);
     const manifest = addonManifestCache.get(addon.id);
     const resources = Array.isArray(manifest?.resources)
@@ -707,6 +709,12 @@ async function inspectAddon(addon) {
 
     const configState = buildAddonConfigForm(addon, manifest, manifestUrl);
     if (configState.form) addonCatalogResults.append(configState.form);
+    if (configState.missingRequired) {
+      const requiredNote = document.createElement("p");
+      requiredNote.className = "auth-status is-error";
+      requiredNote.textContent = "أكمل حقول الإعداد المطلوبة ثم احفظها حتى تعمل كتالوجات هذه الإضافة.";
+      addonCatalogResults.append(requiredNote);
+    }
 
     const catalogButtons = document.createElement("div");
     catalogButtons.className = "addon-catalog-buttons";
