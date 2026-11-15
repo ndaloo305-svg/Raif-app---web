@@ -1,7 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.119.0";
 
-const SUPABASE_URL = "https://wdgjjqwxsluumltezqlp.supabase.co";
-const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_gQ-8YLFPKOLy8MCQnu0gkQ_QOm0b_bn";
+const SUPABASE_URL = "https://puhipyjljmbvczijtzkb.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_cfCNLzoEfFSf5mLwunrmCw_qDdyWIo7";
 const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
 
 const items = [
@@ -16,7 +16,7 @@ const items = [
 let activeFilter = "all";
 let activeView = "home";
 let currentUser = null;
-const SHARED_ACCOUNT_EMAIL = "raif-shared@wdgjjqwxsluumltezqlp.supabase.co";
+const SHARED_ACCOUNT_EMAIL = "raif-shared@puhipyjljmbvczijtzkb.supabase.co";
 let savedIds = [];
 let favoritesLoading = false;
 let addons = [];
