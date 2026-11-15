@@ -737,6 +737,34 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
       content.prepend(poster);
     }
 
+    let selectedVideoId = null;
+    if (catalogEntry.type === "series" && Array.isArray(meta.videos) && meta.videos.length) {
+      selectedVideoId = meta.videos[0]?.id || null;
+      const episodeLabel = document.createElement("label");
+      episodeLabel.className = "episode-select-label";
+      episodeLabel.textContent = "اختر الموسم والحلقة";
+      const episodeSelect = document.createElement("select");
+      episodeSelect.className = "episode-select";
+      meta.videos.forEach((video, index) => {
+        if (!video?.id) return;
+        const option = document.createElement("option");
+        option.value = video.id;
+        option.textContent = [
+          video.season != null ? "الموسم " + video.season : "",
+          video.episode != null ? "الحلقة " + video.episode : "",
+          video.title || ("حلقة " + (index + 1))
+        ].filter(Boolean).join(" · ");
+        episodeSelect.append(option);
+      });
+      episodeSelect.value = selectedVideoId || "";
+      episodeSelect.addEventListener("change", () => {
+        selectedVideoId = episodeSelect.value || null;
+        streamsArea.replaceChildren();
+        streamsButton.textContent = "عرض مصادر تشغيل الحلقة";
+      });
+      content.append(episodeLabel, episodeSelect);
+    }
+
     const subtitleButton = document.createElement("button");
     subtitleButton.type = "button";
     subtitleButton.className = "save-btn";
@@ -766,7 +794,8 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
             typeof resource === "string" ? resource : resource?.name
           ) : [];
           if (!resources.includes("stream")) return [];
-          const streamData = await fetchAddonResource(candidate, "stream", catalogEntry.type, meta.id);
+          const streamData = await fetchAddonResource(candidate, "stream", catalogEntry.type, meta.id,
+            selectedVideoId ? {videoId:selectedVideoId} : {});
           return (Array.isArray(streamData?.streams) ? streamData.streams : [])
             .map(stream => ({...stream, _raifProviderName:candidate.name || candidate.addon_id}));
         }));
