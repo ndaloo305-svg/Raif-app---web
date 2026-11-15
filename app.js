@@ -4,25 +4,27 @@ const SUPABASE_URL = "https://puhipyjljmbvczijtzkb.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_cfCNLzoEfFSf5mLwunrmCw_qDdyWIo7";
 const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
 
-const items = [
- {id:1,title:"رحلة إلى المجهول",type:"movie",year:"2025",genre:"مغامرة",symbol:"✧",c1:"#4d3b35",c2:"#171c2b",description:"عنوان تجريبي لعرض شكل بطاقة المحتوى وتفاصيلها داخل واجهة RAIF."},
- {id:2,title:"مدينة الظلال",type:"series",year:"2024",genre:"دراما",symbol:"◈",c1:"#273d4a",c2:"#151a25",description:"بيانات تجريبية فقط. لم يتم ربط أي مزود محتوى أو مصدر بث بعد."},
- {id:3,title:"آخر المحاربين",type:"anime",year:"2025",genre:"أنمي",symbol:"武",c1:"#6b3e35",c2:"#241923",description:"بطاقة أنمي تجريبية لا تمثل عملاً حقيقياً أو رابط مشاهدة."},
- {id:4,title:"ما وراء النجوم",type:"movie",year:"2023",genre:"خيال علمي",symbol:"✦",c1:"#334b63",c2:"#17192b",description:"مساحة مخصصة مستقبلاً لبيانات TMDB أو مصدر بيانات تختاره."},
- {id:5,title:"ملفات سرية",type:"series",year:"2025",genre:"تشويق",symbol:"⌁",c1:"#51433a",c2:"#1b1b22",description:"سيتم لاحقاً توصيل صفحة التفاصيل بمصادر المحتوى المتاحة."},
- {id:6,title:"أفق جديد",type:"anime",year:"2024",genre:"خيال",symbol:"星",c1:"#66513b",c2:"#202238",description:"هذا المحتوى الوهمي موجود لاختبار العرض والبحث والتصفية فقط."}
-];
-
 let activeFilter = "all";
 let activeView = "home";
 let currentUser = null;
 const SHARED_ACCOUNT_EMAIL = "raif-shared@puhipyjljmbvczijtzkb.supabase.co";
 let savedIds = [];
+let savedItems = [];
 let favoritesLoading = false;
 let addons = [];
 let addonCatalogItems = [];
 let addonCatalogLoading = false;
+let addonDiscoveryRun = 0;
 const addonDiscoveryCache = new Set();
+const addonManifestCache = new Map();
+const addonLoadErrors = new Map();
+
+function resetAddonDiscovery() {
+  addonCatalogItems = [];
+  addonDiscoveryCache.clear();
+  addonManifestCache.clear();
+  addonLoadErrors.clear();
+}
 
 const catalog = document.querySelector("#catalog");
 const search = document.querySelector("#search");
@@ -63,15 +65,11 @@ function render() {
   const q = search.value.trim().toLocaleLowerCase("ar");
   const matches = (item) =>
     (activeFilter === "all" || item.type === activeFilter) &&
-    (activeView !== "library" || (item._kind === "demo" && savedIds.includes(item.id))) &&
     ((item.title || "").toLocaleLowerCase("ar").includes(q) ||
-      (item.genre || "").toLocaleLowerCase("ar").includes(q));
-  const addonMatches = addonCatalogItems
-    .filter(item => activeView !== "library" && matches(item));
-  const demoMatches = addonMatches.length
-    ? []
-    : items.map(item => ({...item, _kind:"demo"})).filter(matches);
-  const filtered = [...addonMatches, ...demoMatches];
+      (item.genre || "").toLocaleLowerCase("ar").includes(q) ||
+      String(item.year || "").includes(q));
+  const visibleItems = activeView === "library" ? savedItems : addonCatalogItems;
+  const filtered = visibleItems.filter(matches);
 
   catalog.replaceChildren();
   filtered.forEach(item => {
@@ -80,7 +78,7 @@ function render() {
     card.tabIndex = 0;
     card.setAttribute("role", "button");
     card.setAttribute("aria-label", "تفاصيل " + item.title);
-    if (item._kind === "addon") {
+    if (item._kind === "addon" || item._kind === "saved") {
       const posterUrl = safeHttpsUrl(item.poster);
       if (posterUrl) {
         const poster = document.createElement("img");
@@ -120,9 +118,30 @@ function render() {
     detail.className = "media-meta";
     detail.textContent = [item.genre, typeNames[item.type] || item.type].filter(Boolean).join(" · ");
     card.append(label, title, detail);
+    if (item._kind === "addon" && item._raifProviders?.length > 1) {
+      const sources = document.createElement("div");
+      sources.className = "media-sources-count";
+      sources.textContent = item._raifProviders.length + " مصادر متاحة";
+      card.append(sources);
+    }
     card.addEventListener("click", () => {
       if (item._kind === "addon") openAddonMeta(item.addon, item.catalogEntry, item.meta);
-      else openDetail(item.id);
+      else if (item._kind === "saved") {
+        const addon = addons.find(candidate => candidate.id === item.addon_id);
+        if (addon) {
+          openAddonMeta(addon, {type:item.catalog_resource_type || item.type, id:item.catalog_id || item.catalog_resource_type || item.type},
+            {id:item.meta_id || item.id, name:item.title, year:item.year, poster:item.poster, description:item.description});
+        } else {
+          const detail = document.querySelector("#detail-content");
+          detail.replaceChildren();
+          const title = document.createElement("h2");
+          title.textContent = item.title;
+          const note = document.createElement("p");
+          note.textContent = item.description || "العنوان محفوظ في مكتبتك، لكن مصدر البيانات المرتبط به لم يعد متاحًا.";
+          detail.append(title,note);
+          document.querySelector("#detail-dialog").showModal();
+        }
+      }
     });
     card.addEventListener("keydown", event => {
       if (event.key === "Enter" || event.key === " ") {
@@ -133,23 +152,39 @@ function render() {
     catalog.append(card);
   });
 
-  if (activeView === "library" && !currentUser) {
+  if (!currentUser && activeView !== "library") {
+    empty.textContent = "سجّل الدخول أولاً حتى يجمع RAIF كتالوجات مصادر حسابك.";
+  } else if (activeView === "library" && !currentUser) {
     empty.textContent = "سجّل الدخول أولاً لعرض مكتبتك المحفوظة على RAIF.";
   } else if (activeView === "library" && favoritesLoading) {
     empty.textContent = "جارٍ تحميل مكتبتك...";
   } else if (addonCatalogLoading && activeView !== "library") {
     empty.textContent = "جارٍ تحميل أفلام ومسلسلات المصادر...";
   } else {
+    const failures = addonLoadErrors.size;
     empty.textContent = activeView === "library"
-      ? "مكتبتك فارغة حالياً. أضف عناوين من نافذة التفاصيل."
-      : "لم تصل عناوين من الإضافات لهذا القسم بعد. تأكد من تفعيل مصدر يدعم الكتالوج.";
+      ? "مكتبتك فارغة حالياً. أضف عناوين حقيقية من كتالوجات RAIF."
+      : failures
+        ? "لم تصل نتائج من بعض المصادر (" + failures + "). افتح «مصادري» لمراجعة تفاصيل الأخطاء."
+        : "لا توجد عناوين حقيقية في هذا القسم حتى الآن. أضف أو فعّل مصدرًا يوفّر كتالوجًا.";
   }
   empty.hidden = filtered.length > 0;
+  const catalogSummary = document.querySelector("#catalog-summary");
+  if (catalogSummary) {
+    const sourceCount = new Set(filtered.flatMap(item => (item._raifProviders || [{addon:item.addon}])
+      .map(provider => provider?.addon?.id).filter(Boolean))).size;
+    catalogSummary.textContent = !currentUser
+      ? "سجّل الدخول لعرض الكتالوجات الحقيقية من مصادر حسابك."
+      : filtered.length
+        ? "يعرض RAIF " + filtered.length + " عنوانًا حقيقيًا" + (sourceCount ? " من " + sourceCount + " مصدرًا." : ".")
+        : (addonCatalogLoading ? "جارٍ جلب الكتالوجات من المصادر المفعّلة..." : "لا توجد عناوين حقيقية للعرض حاليًا.");
+  }
 }
 
 async function loadFavorites() {
   if (!currentUser) {
     savedIds = [];
+    savedItems = [];
     favoritesLoading = false;
     render();
     return;
@@ -168,52 +203,22 @@ async function loadFavorites() {
     return;
   }
 
-  savedIds = (data || [])
-    .map(row => Number(row.metadata?.demo_id))
-    .filter(id => Number.isInteger(id) && items.some(item => item.id === id));
-
-  await migrateLocalFavorites();
+  savedItems = (data || []).map(row => {
+    const meta = row.metadata || {};
+    return {
+      _kind:"saved", content_id:row.content_id, id:meta.meta_id || row.content_id,
+      type:meta.catalog_type || row.content_type, title:meta.title || "عنوان محفوظ",
+      year:meta.year || "", genre:meta.genre || "", poster:meta.poster || "",
+      description:meta.description || "", meta_id:meta.meta_id || row.content_id,
+      addon_id:meta.addon_id || "", catalog_id:meta.catalog_id || "",
+      catalog_type:meta.catalog_type || row.content_type,
+      catalog_resource_type:meta.catalog_resource_type || meta.catalog_type || row.content_type
+    };
+  });
+  savedIds = (data || []).map(row => row.content_id);
   render();
 }
 
-async function migrateLocalFavorites() {
-  if (!currentUser) return;
-  let oldIds = [];
-  try {
-    const stored = JSON.parse(localStorage.getItem("raif-web-saved-items") || "[]");
-    if (Array.isArray(stored)) oldIds = stored.filter(Number.isInteger);
-  } catch {
-    oldIds = [];
-  }
-  const pending = oldIds.filter(id => items.some(item => item.id === id) && !savedIds.includes(id));
-  if (!pending.length) return;
-
-  const rows = pending.map(id => {
-    const item = items.find(entry => entry.id === id);
-    return {
-      user_id: currentUser.id,
-      content_id: `demo-${item.id}`,
-      content_type: itemContentType(item),
-      metadata: {
-        demo_id: item.id,
-        title: item.title,
-        year: item.year,
-        genre: item.genre,
-        catalog_type: item.type
-      }
-    };
-  });
-  const { error } = await supabase.from("favorites").upsert(rows, {
-    onConflict: "user_id,content_id,content_type",
-    ignoreDuplicates: true
-  });
-  if (!error) {
-    localStorage.removeItem("raif-web-saved-items");
-    savedIds = [...new Set([...savedIds, ...pending])];
-  } else {
-    setStatus(accountStatus, "تعذر نقل العناصر المحفوظة القديمة: " + error.message, true);
-  }
-}
 
 async function toggleFavorite(item) {
   if (!currentUser) {
@@ -224,31 +229,47 @@ async function toggleFavorite(item) {
 
   const button = document.querySelector("#toggle-save");
   if (button) button.disabled = true;
-  const contentId = `demo-${item.id}`;
+  const resourceType = item.catalogEntry?.type || item.catalog_resource_type || item.type;
+  const contentId = item.content_id || ("stremio:" + resourceType + ":" + item.id);
   const contentType = itemContentType(item);
+  const isSaved = savedIds.includes(contentId);
+  const provider = item._raifProviders?.[0] || {addon:item.addon, catalogEntry:item.catalogEntry};
+  const metadata = {
+    meta_id:item.id,
+    title:item.title || item.meta?.name || item.id,
+    year:item.year || item.meta?.year || "",
+    genre:item.genre || (Array.isArray(item.meta?.genres) ? item.meta.genres.join("، ") : ""),
+    poster:item.poster || item.meta?.poster || "",
+    description:item.meta?.description || "",
+    catalog_type:item.type,
+    catalog_resource_type:provider.catalogEntry?.type || item.catalog_resource_type || item.type,
+    catalog_id:provider.catalogEntry?.id || item.catalog_id || "",
+    addon_id:provider.addon?.id || item.addon_id || ""
+  };
   let error;
 
-  if (savedIds.includes(item.id)) {
+  if (isSaved) {
     ({ error } = await supabase.from("favorites")
       .delete()
       .eq("user_id", currentUser.id)
       .eq("content_id", contentId)
       .eq("content_type", contentType));
-    if (!error) savedIds = savedIds.filter(id => id !== item.id);
+    if (!error) {
+      savedIds = savedIds.filter(id => id !== contentId);
+      savedItems = savedItems.filter(entry => entry.content_id !== contentId);
+    }
   } else {
     ({ error } = await supabase.from("favorites").insert({
       user_id: currentUser.id,
       content_id: contentId,
       content_type: contentType,
-      metadata: {
-        demo_id: item.id,
-        title: item.title,
-        year: item.year,
-        genre: item.genre,
-        catalog_type: item.type
-      }
+      metadata
     }));
-    if (!error) savedIds = [...savedIds, item.id];
+    if (!error) {
+      savedIds = [...savedIds, contentId];
+      savedItems = [...savedItems, {...metadata, _kind:"saved", content_id:contentId, id:item.id,
+        type:item.type, title:metadata.title, year:metadata.year, genre:metadata.genre, poster:metadata.poster}];
+    }
   }
 
   if (error) {
@@ -259,26 +280,12 @@ async function toggleFavorite(item) {
 
   setStatus(accountStatus, "تم تحديث مكتبتك ومزامنتها مع RAIF.");
   if (button) {
-    button.textContent = savedIds.includes(item.id) ? "إزالة من مكتبتي" : "＋ أضف إلى مكتبتي";
+    button.textContent = savedIds.includes(contentId) ? "إزالة من مكتبتي" : "＋ أضف إلى مكتبتي";
     button.disabled = false;
   }
-  if (activeView === "library") render();
+  render();
 }
 
-function openDetail(id) {
-  const item = items.find(entry => entry.id === id);
-  if (!item) return;
-  const isSaved = savedIds.includes(item.id);
-  document.querySelector("#detail-content").innerHTML = `
-    <span class="eyebrow">${typeNames[item.type]} · ${item.year}</span>
-    <h2>${item.title}</h2>
-    <p>${item.description}</p>
-    <button class="save-btn" id="toggle-save" type="button">${isSaved ? "إزالة من مكتبتي" : "＋ أضف إلى مكتبتي"}</button>
-    <div class="detail-note">حالة المحتوى: بيانات تجريبية. المفضلة تُحفظ في حساب RAIF بعد تسجيل الدخول، أما مصادر البث فلم تُربط بعد.</div>
-  `;
-  document.querySelector("#toggle-save").addEventListener("click", () => toggleFavorite(item));
-  document.querySelector("#detail-dialog").showModal();
-}
 
 async function loadSources() {
   const list = document.querySelector("#source-list");
@@ -322,8 +329,31 @@ async function loadSources() {
     const name = document.createElement("strong");
     name.textContent = addon.name || addon.addon_id;
     const url = document.createElement("span");
-    url.textContent = addon.manifest_url;
+    try {
+      const manifestDisplayUrl = new URL(addon.manifest_url);
+      url.textContent = manifestDisplayUrl.origin + manifestDisplayUrl.pathname +
+        (manifestDisplayUrl.search ? " · إعدادات محفوظة" : "");
+    } catch { url.textContent = "رابط Manifest غير صالح"; }
     details.append(name, url);
+    const manifest = addonManifestCache.get(addon.id);
+    const resources = Array.isArray(manifest?.resources)
+      ? manifest.resources.map(resource => typeof resource === "string" ? resource : resource?.name).filter(Boolean)
+      : (Array.isArray(addon.config?.resources) ? addon.config.resources : []);
+    const capabilities = document.createElement("small");
+    capabilities.className = "source-capabilities";
+    capabilities.textContent = resources.length
+      ? ["catalog","stream","subtitles","meta"].filter(resource => resources.includes(resource)).map(resource => ({
+          catalog:"كتالوج",stream:"تشغيل",subtitles:"ترجمة",meta:"تفاصيل"
+        })[resource]).join(" · ")
+      : "لم يُفحص Manifest بعد";
+    details.append(capabilities);
+    const loadError = [...addonLoadErrors.values()].find(entry => entry.name === (addon.name || addon.addon_id));
+    if (loadError) {
+      const errorNote = document.createElement("small");
+      errorNote.className = "is-error";
+      errorNote.textContent = "آخر خطأ: " + loadError.message;
+      details.append(errorNote);
+    }
     identity.append(details);
 
     const actions = document.createElement("div");
@@ -397,53 +427,147 @@ function fetchAddonManifestByUrl(manifestUrl) {
   return invokeAddonProxy({action:"inspect_url", manifest_url:manifestUrl}, "Manifest");
 }
 
+function normalizeCatalogTitle(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u064B-\u065F\u0670\u06D6-\u06ED]/g, "")
+    .replace(/[أإآٱ]/g, "ا")
+    .replace(/ى/g, "ي")
+    .replace(/ة/g, "ه")
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function catalogIdentity(meta, type) {
+  const ids = [meta?.imdb_id, meta?.imdbId, meta?.id]
+    .filter(value => typeof value === "string")
+    .map(value => value.trim().toLowerCase());
+  const imdb = ids.find(value => /^tt\d{5,12}(?::\d+:\d+)?$/.test(value));
+  if (imdb) return type + "|imdb|" + imdb.split(":")[0];
+  const tmdb = ids.find(value => /^(?:tmdb:|tmdb\/|movie:|tv:)?\d{2,12}$/.test(value));
+  if (tmdb) return type + "|id|" + tmdb.replace(/^(?:tmdb:|tmdb\/|movie:|tv:)/, "");
+  const title = normalizeCatalogTitle(meta?.name || meta?.title);
+  const year = String(meta?.year || "").match(/\d{4}/)?.[0] || "";
+  return title ? type + "|title|" + title + "|" + year : "";
+}
+
+function withAddonTimeout(promise, label, timeoutMs = 11000) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error("انتهت مهلة انتظار " + label + " (11 ثانية).")), timeoutMs);
+    })
+  ]).finally(() => clearTimeout(timer));
+}
+
 async function loadAddonDiscovery(view = activeView) {
   if (!currentUser || view === "library" || view === "sources") return;
+  const runId = ++addonDiscoveryRun;
   const wanted = view === "movies" ? ["movie"] :
     view === "series" ? ["series"] :
     view === "anime" ? ["anime", "series"] : ["movie", "series", "anime"];
   const enabled = addons.filter(addon => addon.enabled);
-  if (!enabled.length) { render(); return; }
   addonCatalogLoading = true;
+  addonLoadErrors.clear();
   render();
-  try {
-    await Promise.all(enabled.map(async addon => {
-      try {
-        const manifest = await fetchAddonResource(addon, "manifest");
-        const catalogs = Array.isArray(manifest?.catalogs) ? manifest.catalogs : [];
-        await Promise.all(catalogs.filter(entry => entry?.id && wanted.includes(entry.type))
-          .map(async entry => {
-            const key = addon.id + "|" + entry.type + "|" + entry.id;
-            if (addonDiscoveryCache.has(key)) return;
-            addonDiscoveryCache.add(key);
-            try {
-              const data = await fetchAddonResource(addon, "catalog", entry.type, entry.id, {skip:0});
-              const metas = Array.isArray(data?.metas) ? data.metas : [];
-              metas.forEach(meta => {
-                if (!meta || !meta.id) return;
-                const type = entry.type === "anime" ? "anime" : entry.type;
-                const identity = addon.id + "|" + type + "|" + meta.id;
-                if (addonCatalogItems.some(item => item.identity === identity)) return;
-                addonCatalogItems.push({
-                  _kind:"addon", identity, addon, catalogEntry:entry, meta,
-                  id:meta.id, type, title:meta.name || meta.id,
-                  year:meta.year || "", genre:Array.isArray(meta.genres) ? meta.genres.join("، ") : "",
-                  poster:meta.poster || ""
-                });
-              });
-            } catch (error) {
-              console.warn("RAIF catalog load failed:", addon.name, entry.id, error);
-            }
-          }));
-      } catch (error) {
-        console.warn("RAIF manifest load failed:", addon.name, error);
-      }
-    }));
-  } finally {
+  if (!enabled.length) {
     addonCatalogLoading = false;
     render();
+    return;
   }
+
+  const jobs = enabled.map(async addon => {
+    try {
+      const manifest = addonManifestCache.get(addon.id) ||
+        await withAddonTimeout(fetchAddonResource(addon, "manifest"), "Manifest · " + (addon.name || addon.addon_id));
+      addonManifestCache.set(addon.id, manifest);
+      const catalogs = Array.isArray(manifest?.catalogs) ? manifest.catalogs : [];
+      const entries = catalogs.filter(entry => {
+        if (!entry?.id || !wanted.includes(entry.type)) return false;
+        const label = String(entry.id + " " + (entry.name || "")).toLowerCase();
+        if (view === "anime") return entry.type === "anime" || /anime|animation|cartoon/.test(label);
+        return true;
+      });
+      if (!entries.length) return;
+
+      await Promise.all(entries.map(async entry => {
+        const key = addon.id + "|" + entry.type + "|" + entry.id;
+        if (addonDiscoveryCache.has(key)) return;
+        try {
+          const data = await withAddonTimeout(
+            fetchAddonResource(addon, "catalog", entry.type, entry.id, {skip:0}),
+            "كتالوج " + (entry.name || entry.id)
+          );
+          addonDiscoveryCache.add(key);
+          const metas = Array.isArray(data?.metas) ? data.metas : [];
+          metas.forEach(meta => {
+            if (!meta || !meta.id) return;
+            const catalogLabel = String(entry.id + " " + (entry.name || "")).toLowerCase();
+            const type = entry.type === "anime" || /anime|animation|cartoon/.test(catalogLabel) ? "anime" : entry.type;
+            const identity = catalogIdentity(meta, type) || type + "|source|" + addon.id + "|" + meta.id;
+            const existing = addonCatalogItems.find(item => item.identity === identity);
+            const provider = {addon, catalogEntry:entry, metaId:meta.id, catalogName:entry.name || entry.id};
+            if (existing) {
+              if (!existing._raifProviders.some(item => item.addon.id === addon.id && item.metaId === meta.id)) {
+                existing._raifProviders.push(provider);
+              }
+              if (!existing.poster && meta.poster) existing.poster = meta.poster;
+              if (!existing.year && meta.year) existing.year = meta.year;
+              return;
+            }
+            addonCatalogItems.push({
+              _kind:"addon", identity, addon, catalogEntry:entry, meta,
+              _raifProviders:[provider],
+              id:meta.id, type, title:meta.name || meta.id,
+              year:meta.year || "",
+              genre:Array.isArray(meta.genres) ? meta.genres.join("، ") : "",
+              poster:meta.poster || ""
+            });
+          });
+          render();
+        } catch (error) {
+          addonLoadErrors.set(addon.id + "|" + entry.id, {name:addon.name || addon.addon_id, message:error.message});
+        }
+      }));
+    } catch (error) {
+      addonLoadErrors.set(addon.id, {name:addon.name || addon.addon_id, message:error.message});
+    }
+  });
+
+  await Promise.allSettled(jobs);
+  if (runId === addonDiscoveryRun) addonCatalogLoading = false;
+  render();
 }
+
+document.querySelector("#player-speed")?.addEventListener("change", event => {
+  const video = document.querySelector("#raif-video");
+  video.playbackRate = Number(event.target.value) || 1;
+  localStorage.setItem("raif-player-speed", String(video.playbackRate));
+});
+document.querySelector("#player-quality")?.addEventListener("change", event => {
+  if (activeHlsPlayer) activeHlsPlayer.currentLevel = Number(event.target.value);
+});
+document.querySelector("#player-subtitles")?.addEventListener("change", event => {
+  const value = Number(event.target.value);
+  if (activeHlsPlayer) activeHlsPlayer.subtitleTrack = value;
+  const video = document.querySelector("#raif-video");
+  Array.from(video.textTracks || []).forEach((track, index) => {
+    track.mode = value === index ? "showing" : "disabled";
+  });
+});
+
+document.addEventListener("keydown", event => {
+  const dialog = document.querySelector("#player-dialog");
+  if (!dialog?.open || event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement || event.target instanceof HTMLTextAreaElement) return;
+  const video = document.querySelector("#raif-video");
+  if (event.key === " " && !event.repeat) { event.preventDefault(); video.paused ? video.play().catch(() => {}) : video.pause(); }
+  else if (event.key === "ArrowRight") { event.preventDefault(); video.currentTime = Math.min(video.duration || Infinity, video.currentTime + 10); }
+  else if (event.key === "ArrowLeft") { event.preventDefault(); video.currentTime = Math.max(0, video.currentTime - 10); }
+  else if (event.key.toLowerCase() === "f") { event.preventDefault(); if (!document.fullscreenElement) video.requestFullscreen?.(); else document.exitFullscreen?.(); }
+});
 
 function renderAddonMessage(message, isError = false) {
   addonCatalogResults.replaceChildren();
@@ -451,6 +575,89 @@ function renderAddonMessage(message, isError = false) {
   note.className = isError ? "auth-status is-error" : "empty-state";
   note.textContent = message;
   addonCatalogResults.append(note);
+}
+
+function buildAddonConfigForm(addon, manifest, manifestUrl) {
+  const specs = Array.isArray(manifest.config) ? manifest.config.filter(item => item && typeof item === "object") : [];
+  if (!specs.length) return {form:null, missingRequired:false};
+  const form = document.createElement("form");
+  form.className = "addon-extra-form";
+  const heading = document.createElement("strong");
+  heading.textContent = "إعدادات الإضافة";
+  form.append(heading);
+  let missingRequired = false;
+
+  specs.slice(0, 20).forEach(spec => {
+    const key = String(spec.key || spec.name || "").trim();
+    if (!key || !/^[a-zA-Z0-9_-]{1,64}$/.test(key)) return;
+    const required = spec.required === true || spec.isRequired === true;
+    const current = manifestUrl.searchParams.get(key) ?? spec.default ?? "";
+    if (required && !String(current).trim()) missingRequired = true;
+    const label = document.createElement("label");
+    label.textContent = String(spec.title || spec.name || key) + (required ? " *" : "");
+    let field;
+    const kind = String(spec.type || "text").toLowerCase();
+    if (Array.isArray(spec.options) && spec.options.length) {
+      field = document.createElement("select");
+      field.append(new Option(required ? "اختر قيمة" : "القيمة الافتراضية", ""));
+      spec.options.forEach(option => {
+        const value = typeof option === "object" && option !== null
+          ? String(option.value ?? option.key ?? option.name ?? "")
+          : String(option);
+        const caption = typeof option === "object" && option !== null
+          ? String(option.title ?? option.name ?? option.value ?? value)
+          : String(option);
+        field.append(new Option(caption, value));
+      });
+      field.value = String(current);
+    } else {
+      field = document.createElement("input");
+      field.type = ["password","number","email","url"].includes(kind) ? kind : "text";
+      field.value = String(current);
+      if (kind === "checkbox" || kind === "boolean") {
+        field.type = "checkbox";
+        field.checked = /^(true|1|yes|on)$/i.test(String(current));
+      }
+    }
+    field.name = key;
+    field.required = required && field.type !== "checkbox";
+    label.append(field);
+    form.append(label);
+  });
+
+  const save = document.createElement("button");
+  save.type = "submit";
+  save.className = "save-btn";
+  save.textContent = "حفظ إعدادات الإضافة";
+  form.append(save);
+  form.addEventListener("submit", async event => {
+    event.preventDefault();
+    const updatedUrl = new URL(manifestUrl.href);
+    specs.forEach(spec => {
+      const key = String(spec.key || spec.name || "").trim();
+      const field = form.elements.namedItem(key);
+      if (!field) return;
+      const value = field.type === "checkbox" ? String(field.checked) : String(field.value || "").trim();
+      if (value) updatedUrl.searchParams.set(key, value);
+      else updatedUrl.searchParams.delete(key);
+    });
+    save.disabled = true;
+    save.textContent = "جارٍ حفظ الإعدادات...";
+    try {
+      await updateSource(addon.id, {
+        manifest_url:updatedUrl.href,
+        config:{...(addon.config || {}), manifest_configured:true}
+      });
+      const updatedAddon = addons.find(item => item.id === addon.id) || {...addon, manifest_url:updatedUrl.href};
+      await inspectAddon(updatedAddon);
+    } catch (error) {
+      renderAddonMessage("تعذر حفظ إعدادات الإضافة: " + error.message, true);
+    } finally {
+      save.disabled = false;
+      save.textContent = "حفظ إعدادات الإضافة";
+    }
+  });
+  return {form, missingRequired};
 }
 
 async function inspectAddon(addon) {
@@ -504,6 +711,15 @@ async function inspectAddon(addon) {
     heading.append(headingText);
     addonCatalogResults.append(heading);
 
+    const configState = buildAddonConfigForm(addon, manifest, manifestUrl);
+    if (configState.form) addonCatalogResults.append(configState.form);
+    if (configState.missingRequired) {
+      const requiredNote = document.createElement("p");
+      requiredNote.className = "auth-status is-error";
+      requiredNote.textContent = "أكمل حقول الإعداد المطلوبة ثم احفظها حتى تعمل كتالوجات هذه الإضافة.";
+      addonCatalogResults.append(requiredNote);
+    }
+
     const catalogButtons = document.createElement("div");
     catalogButtons.className = "addon-catalog-buttons";
     manifest.catalogs.forEach(entry => {
@@ -512,6 +728,7 @@ async function inspectAddon(addon) {
       button.type = "button";
       button.className = "filter";
       button.textContent = entry.name || (entry.type + " · " + entry.id);
+      button.disabled = configState.missingRequired;
       button.addEventListener("click", () => configureAddonCatalog(addon, entry, button));
       catalogButtons.append(button);
     });
@@ -526,6 +743,9 @@ async function inspectAddon(addon) {
 let activeHlsPlayer = null;
 let activeDashPlayer = null;
 let selectedSubtitle = null;
+let lastProgressSavedAt = 0;
+let currentProgressKey = "";
+let activeStreamFallback = null;
 
 function applySelectedSubtitle(video) {
   video.querySelectorAll('track[data-raif-subtitle="true"]').forEach(track => track.remove());
@@ -538,6 +758,11 @@ function applySelectedSubtitle(video) {
   track.default = true;
   track.dataset.raifSubtitle = "true";
   video.append(track);
+  const subtitleSelect = document.querySelector("#player-subtitles");
+  if (subtitleSelect) {
+    subtitleSelect.replaceChildren(new Option("إيقاف", "-1"), new Option(track.label || "ترجمة", "0"));
+    subtitleSelect.value = "0";
+  }
   track.addEventListener("load", () => {
     for (const item of video.textTracks) item.mode = item === track.track ? "showing" : "disabled";
   }, {once:true});
@@ -546,6 +771,9 @@ function applySelectedSubtitle(video) {
 function setSelectedSubtitle(subtitle) {
   if (selectedSubtitle?.objectUrl) URL.revokeObjectURL(selectedSubtitle.objectUrl);
   selectedSubtitle = subtitle;
+  if (subtitle?.language && subtitle.language !== "und") {
+    try { localStorage.setItem("raif-subtitle-language", subtitle.language); } catch {}
+  }
   const video = document.querySelector("#raif-video");
   if (video) applySelectedSubtitle(video);
 }
@@ -563,13 +791,13 @@ function subtitleToVtt(raw) {
   return "WEBVTT\n\n" + value;
 }
 
-async function fetchSubtitleFile(subtitle, catalogEntry, meta) {
+async function fetchSubtitleFile(subtitle, catalogEntry, meta, selectedVideoId = null) {
   const {data, error} = await supabase.functions.invoke("raif-addon-proxy", {
     body: {
       action:"subtitle_file",
       addon_id:subtitle.addonId,
       type:catalogEntry.type,
-      content_id:meta.id,
+      content_id:selectedVideoId || meta.id,
       subtitle_url:subtitle.url
     }
   });
@@ -579,14 +807,18 @@ async function fetchSubtitleFile(subtitle, catalogEntry, meta) {
   return URL.createObjectURL(new Blob([vtt], {type:"text/vtt;charset=utf-8"}));
 }
 
-async function findSubtitles(meta, catalogEntry, area, button) {
+async function findSubtitles(meta, catalogEntry, area, button, selectedVideoId = null) {
   area.replaceChildren();
   button.disabled = true;
   button.textContent = "جارٍ البحث عن الترجمات...";
-  const candidates = addons.filter(addon => addon.enabled && (
-    (Array.isArray(addon.config?.resources) && addon.config.resources.includes("subtitles")) ||
-    /subtito|subsource|subdl|submaker|opensubtitles/i.test(addon.name || "")
-  ));
+  const candidates = addons.filter(addon => {
+    if (!addon.enabled) return false;
+    const manifest = addonManifestCache.get(addon.id);
+    const resources = Array.isArray(manifest?.resources)
+      ? manifest.resources.map(resource => typeof resource === "string" ? resource : resource?.name)
+      : (Array.isArray(addon.config?.resources) ? addon.config.resources : []);
+    return resources.includes("subtitles") || /subtito|subsource|subdl|submaker|opensubtitles/i.test(addon.name || "");
+  });
   if (!candidates.length) {
     const note = document.createElement("p");
     note.textContent = "لم يتم إعداد أي مصدر ترجمات بعد. أضف Subtito أو SubSource أو SubDL أو OpenSubtitles.";
@@ -596,7 +828,7 @@ async function findSubtitles(meta, catalogEntry, area, button) {
     return;
   }
   const results = await Promise.allSettled(candidates.map(async addon => {
-    const data = await fetchAddonResource(addon, "subtitles", catalogEntry.type, meta.id);
+    const data = await withAddonTimeout(fetchAddonResource(addon, "subtitles", catalogEntry.type, selectedVideoId || meta.id), "ترجمات " + (addon.name || addon.addon_id), 12000);
     return (Array.isArray(data?.subtitles) ? data.subtitles : [])
       .filter(entry => typeof entry?.url === "string" && safeHttpsUrl(entry.url))
       .map(entry => ({
@@ -606,7 +838,9 @@ async function findSubtitles(meta, catalogEntry, area, button) {
         language: /^[a-z]{2,3}(?:-[a-z0-9]+)?$/i.test(entry.langCode || "") ? entry.langCode : "und"
       }));
   }));
-  const subtitles = results.flatMap(result => result.status === "fulfilled" ? result.value : []);
+  const preferredLanguage = localStorage.getItem("raif-subtitle-language") || "ar";
+  const subtitles = results.flatMap(result => result.status === "fulfilled" ? result.value : [])
+    .sort((a,b) => Number(b.language.toLowerCase().startsWith(preferredLanguage)) - Number(a.language.toLowerCase().startsWith(preferredLanguage)));
   if (!subtitles.length) {
     const note = document.createElement("p");
     note.textContent = "لم تُرجع المصادر ترجمات لهذا العنوان، أو تعذر الوصول إلى أحدها.";
@@ -621,7 +855,7 @@ async function findSubtitles(meta, catalogEntry, area, button) {
         choose.disabled = true;
         choose.textContent = "جارٍ تحميل الترجمة...";
         try {
-          const objectUrl = await fetchSubtitleFile(subtitle, catalogEntry, meta);
+          const objectUrl = await fetchSubtitleFile(subtitle, catalogEntry, meta, selectedVideoId);
           setSelectedSubtitle({objectUrl, label:subtitle.label, language:subtitle.language});
           choose.textContent = "✓ " + (subtitle.label || "تم اختيار الترجمة");
           area.querySelectorAll("button").forEach(item => { if (item !== choose) item.disabled = true; });
@@ -646,38 +880,168 @@ function disposeStreamPlayer() {
   if (activeHlsPlayer) { activeHlsPlayer.destroy(); activeHlsPlayer = null; }
   if (activeDashPlayer) { activeDashPlayer.reset(); activeDashPlayer = null; }
   if (video) {
+    if (currentProgressKey && Number.isFinite(video.currentTime) && video.currentTime > 5) {
+      try { localStorage.setItem(currentProgressKey, JSON.stringify({time:video.currentTime,duration:video.duration,updatedAt:Date.now()})); } catch {}
+    }
     video.pause();
+    video.onerror = null;
+    video.onplaying = null;
+    video.onloadedmetadata = null;
+    video.ontimeupdate = null;
     video.querySelectorAll('track[data-raif-subtitle="true"]').forEach(track => track.remove());
     video.removeAttribute("src");
+    video.hidden = false;
     video.load();
+    currentProgressKey = "";
   }
+  const embed = document.querySelector("#raif-embed");
+  if (embed) { embed.src = "about:blank"; embed.hidden = true; }
 }
-async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}) {
+async function openEmbedPlayer(rawUrl, title = "RAIF Player") {
+  const target = new URL(rawUrl);
+  const allowed = ["www.youtube-nocookie.com","www.youtube.com","youtube.com","youtu.be","player.vimeo.com","vimeo.com"];
+  if (!allowed.includes(target.hostname.toLowerCase())) throw new Error("هذا الموقع غير موجود ضمن منصات التضمين المسموحة.");
+  if (target.protocol !== "https:") throw new Error("التضمين يتطلب رابط HTTPS.");
+  const dialog = document.querySelector("#player-dialog");
+  const video = document.querySelector("#raif-video");
+  const embed = document.querySelector("#raif-embed");
+  disposeStreamPlayer();
+  video.hidden = true;
+  embed.hidden = false;
+  embed.src = target.href;
+  document.querySelector("#player-title").textContent = title;
+  setStatus(document.querySelector("#player-status"), "يتم عرض المشغل الخارجي. الترجمة وإعدادات الجودة تخضع للمنصة.");
+  if (!dialog.open) dialog.showModal();
+}
+
+function hashPlaybackKey(value) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index++) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function getStreamHealth(url) {
+  try { return JSON.parse(localStorage.getItem("raif-stream-health-" + hashPlaybackKey(url)) || "{}"); }
+  catch { return {}; }
+}
+
+function recordStreamHealth(url, success) {
+  const previous = getStreamHealth(url);
+  const next = {
+    successes:(previous.successes || 0) + (success ? 1 : 0),
+    failures:(previous.failures || 0) + (success ? 0 : 1),
+    lastSuccess:success ? Date.now() : (previous.lastSuccess || 0)
+  };
+  try { localStorage.setItem("raif-stream-health-" + hashPlaybackKey(url), JSON.stringify(next)); } catch {}
+}
+
+async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}, progressIdentity = "") {
   let target;
   try { target = new URL(rawUrl); } catch { throw new Error("رابط التشغيل غير صالح."); }
   if (!["https:", "http:"].includes(target.protocol) || target.username || target.password) throw new Error("المشغل يقبل روابط HTTP وHTTPS فقط.");
   if (target.protocol === "http:" && location.protocol === "https:") throw new Error("المتصفح يمنع تشغيل HTTP داخل صفحة HTTPS. استخدم رابط HTTPS.");
   const dialog = document.querySelector("#player-dialog");
   const video = document.querySelector("#raif-video");
+  const embed = document.querySelector("#raif-embed");
   const status = document.querySelector("#player-status");
+  const qualityWrap = document.querySelector("#player-quality-wrap");
+  const qualitySelect = document.querySelector("#player-quality");
+  const subtitleSelect = document.querySelector("#player-subtitles");
+  const speedSelect = document.querySelector("#player-speed");
   document.querySelector("#player-title").textContent = title;
+  if (qualityWrap) qualityWrap.hidden = true;
+  if (qualitySelect) qualitySelect.replaceChildren(new Option("تلقائي", "-1"));
+  if (subtitleSelect) subtitleSelect.replaceChildren(new Option("إيقاف", "-1"));
+  if (speedSelect) speedSelect.value = localStorage.getItem("raif-player-speed") || "1";
+  video.hidden = false;
+  if (embed) { embed.src = "about:blank"; embed.hidden = true; }
   status.textContent = "جارٍ تجهيز المشغل...";
   status.classList.remove("is-error");
   disposeStreamPlayer();
+  currentProgressKey = "raif-progress-" + hashPlaybackKey(progressIdentity || title);
+  lastProgressSavedAt = 0;
+  video.playbackRate = Number(speedSelect?.value || 1);
   applySelectedSubtitle(video);
-  dialog.showModal();
+  if (!dialog.open) dialog.showModal();
   const mime = String(stream.behaviorHints?.mimeType || stream.mimeType || stream.type || "").toLowerCase();
   const filename = String(stream.behaviorHints?.filename || stream.filename || "");
   const mediaHint = (target.pathname + " " + filename).toLowerCase();
   const isHls = /\.m3u8(?:$|[?#\s])/.test(mediaHint) || /mpegurl|vnd\.apple\.mpegurl/.test(mime);
   const isDash = /\.mpd(?:$|[?#\s])/.test(mediaHint) || /dash\+xml/.test(mime);
-  video.onerror = () => { status.textContent = "تعذر تشغيل الرابط. تأكد أن الرابط ملف وسائط مباشر، وأن الخادم يسمح بالوصول من المتصفح (CORS)."; status.classList.add("is-error"); };
-  video.onplaying = () => { status.textContent = "يتم التشغيل داخل RAIF."; status.classList.remove("is-error"); };
-  const startPlayback = () => video.play().catch(error => {
-    status.textContent = error?.name === "NotSupportedError"
-      ? "صيغة الفيديو غير مدعومة في متصفحك. اختر رابط HLS أو MP4 من المصادر."
-      : "تعذر بدء التشغيل تلقائياً؛ اضغط زر التشغيل داخل الفيديو.";
+  let playbackSettled = false;
+  let playbackFailureRecorded = false;
+  let resolvePlayback, rejectPlayback;
+  const playbackReady = new Promise((resolve, reject) => { resolvePlayback = resolve; rejectPlayback = reject; });
+  const playbackTimeout = setTimeout(() => failPlayback("انتهت مهلة تشغيل هذا المصدر."), 30000);
+  const markPlaying = () => {
+    if (playbackSettled) return;
+    playbackSettled = true;
+    clearTimeout(playbackTimeout);
+    resolvePlayback();
+  };
+  const failPlayback = message => {
+    if (playbackFailureRecorded) return;
+    playbackFailureRecorded = true;
+    status.textContent = message;
     status.classList.add("is-error");
+    recordStreamHealth(target.href, false);
+    if (playbackSettled) {
+      const fallback = activeStreamFallback;
+      activeStreamFallback = null;
+      if (fallback) fallback();
+      return;
+    }
+    playbackSettled = true;
+    clearTimeout(playbackTimeout);
+    rejectPlayback(new Error(message));
+  };
+  video.onerror = () => failPlayback("تعذر تشغيل الرابط. قد يكون منتهيًا أو يتطلب CORS أو ترويسات لا يدعمها المتصفح.");
+  video.onplaying = () => {
+    if (playbackSettled) return;
+    status.textContent = "يتم التشغيل داخل RAIF.";
+    status.classList.remove("is-error");
+    recordStreamHealth(target.href, true);
+    try {
+      localStorage.setItem("raif-last-source-" + hashPlaybackKey(progressIdentity || title), JSON.stringify({
+        url:target.href, provider:stream._raifProviderName || stream.name || stream.title || "", usedAt:Date.now()
+      }));
+    } catch {}
+    markPlaying();
+  };
+  video.onloadedmetadata = () => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(currentProgressKey) || "null");
+      if (saved && Number.isFinite(saved.time) && saved.time > 15 &&
+          (!Number.isFinite(video.duration) || saved.time < video.duration - 15)) {
+        video.currentTime = saved.time;
+        status.textContent = "استُعيد موضع المشاهدة السابق.";
+      }
+    } catch {}
+  };
+  video.ontimeupdate = () => {
+    if (!currentProgressKey || !Number.isFinite(video.currentTime) || video.currentTime < 5) return;
+    const now = Date.now();
+    if (now - lastProgressSavedAt < 8000) return;
+    lastProgressSavedAt = now;
+    try {
+      localStorage.setItem(currentProgressKey, JSON.stringify({
+        time: video.currentTime, duration: Number.isFinite(video.duration) ? video.duration : null,
+        updatedAt: now, title
+      }));
+    } catch {}
+  };
+  const startPlayback = () => video.play().catch(error => {
+    if (error?.name === "NotAllowedError") {
+      status.textContent = "اضغط زر التشغيل داخل الفيديو لبدء المشاهدة.";
+      status.classList.remove("is-error");
+    } else {
+      failPlayback(error?.name === "NotSupportedError"
+        ? "صيغة الفيديو غير مدعومة في متصفحك."
+        : "تعذر بدء تشغيل هذا المصدر.");
+    }
   });
   if (isHls && video.canPlayType("application/vnd.apple.mpegurl")) {
     video.src = target.href;
@@ -691,13 +1055,30 @@ async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}) {
       activeHlsPlayer.attachMedia(video);
       activeHlsPlayer.on(Hls.Events.MEDIA_ATTACHED, () => activeHlsPlayer?.loadSource(target.href));
       activeHlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => {
+        const levels = activeHlsPlayer?.levels || [];
+        if (qualitySelect && levels.length) {
+          qualitySelect.replaceChildren(new Option("تلقائي", "-1"));
+          levels.forEach((level, index) => {
+            const label = level.height ? level.height + "p" : Math.round((level.bitrate || 0) / 1000) + " kbps";
+            qualitySelect.append(new Option(label, String(index)));
+          });
+          if (qualityWrap) qualityWrap.hidden = false;
+        }
         status.textContent = "تم تحميل قائمة HLS. جارٍ التشغيل...";
         startPlayback();
       });
-      activeHlsPlayer.on(Hls.Events.ERROR, (_event, data) => {
-        if (data.fatal) { status.textContent = "تعذر تشغيل HLS. تحقق من الرابط ودعم CORS."; status.classList.add("is-error"); }
+      activeHlsPlayer.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, (_event, data) => {
+        if (!subtitleSelect) return;
+        subtitleSelect.replaceChildren(new Option("إيقاف", "-1"));
+        (data?.subtitleTracks || []).forEach((track, index) => {
+          const label = [track.name, track.lang].filter(Boolean).join(" · ") || ("ترجمة " + (index + 1));
+          subtitleSelect.append(new Option(label, String(index)));
+        });
       });
-    } catch (error) { status.textContent = "تعذر تجهيز HLS: " + error.message; status.classList.add("is-error"); }
+      activeHlsPlayer.on(Hls.Events.ERROR, (_event, data) => {
+        if (data.fatal) failPlayback("تعذر تشغيل HLS. قد يكون الرابط منتهيًا أو يمنع الخادم الوصول (CORS).");
+      });
+    } catch (error) { failPlayback("تعذر تجهيز HLS: " + error.message); }
   } else if (isDash) {
     try {
       const module = await import("https://esm.sh/dashjs@5.0.3");
@@ -705,17 +1086,44 @@ async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}) {
       activeDashPlayer = dashjs.MediaPlayer().create();
       activeDashPlayer.initialize(video, target.href, false);
       activeDashPlayer.on(dashjs.MediaPlayer.events.ERROR, () => {
-        status.textContent = "تعذر تشغيل DASH. تحقق من الرابط ودعم CORS.";
-        status.classList.add("is-error");
+        failPlayback("تعذر تشغيل DASH. تحقق من الرابط ودعم CORS.");
       });
       status.textContent = "تم تحميل مشغل DASH. جارٍ التشغيل...";
       startPlayback();
-    } catch (error) { status.textContent = "تعذر تجهيز DASH: " + error.message; status.classList.add("is-error"); }
+    } catch (error) { failPlayback("تعذر تجهيز DASH: " + error.message); }
   } else {
     video.src = target.href;
     status.textContent = "جارٍ بدء تشغيل الفيديو...";
     startPlayback();
   }
+  await playbackReady;
+}
+
+async function playStreamsWithFallback(streams, startIndex, title, progressIdentity) {
+  let lastError = null;
+  for (let index = startIndex; index < streams.length; index++) {
+    const candidate = streams[index];
+    try {
+      await openStreamPlayer(candidate.url, candidate.name || candidate.title || "RAIF", candidate, progressIdentity);
+      activeStreamFallback = () => {
+        activeStreamFallback = null;
+        const status = document.querySelector("#player-status");
+        status.textContent = "توقف المصدر الحالي؛ جارٍ تجربة المصدر التالي...";
+        disposeStreamPlayer();
+        playStreamsWithFallback(streams, index + 1, title, progressIdentity).then(result => {
+          if (!result.success) {
+            status.textContent = "تعذر تشغيل بقية المصادر. " + (result.error?.message || "");
+            status.classList.add("is-error");
+          }
+        });
+      };
+      return {success:true};
+    } catch (error) {
+      lastError = error;
+      disposeStreamPlayer();
+    }
+  }
+  return {success:false,error:lastError};
 }
 
 async function openAddonMeta(addon, catalogEntry, catalogMeta) {
@@ -772,6 +1180,8 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
       episodeSelect.addEventListener("change", () => {
         selectedVideoId = episodeSelect.value || null;
         streamsArea.replaceChildren();
+        availableStreams = [];
+        bestButton.hidden = true;
         streamsButton.textContent = "عرض مصادر تشغيل الحلقة";
       });
       content.append(episodeLabel, episodeSelect);
@@ -783,8 +1193,22 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
     subtitleButton.textContent = "البحث عن الترجمات";
     const subtitleArea = document.createElement("div");
     subtitleArea.className = "addon-subtitle-list";
-    subtitleButton.addEventListener("click", () => findSubtitles(meta, catalogEntry, subtitleArea, subtitleButton));
+    subtitleButton.addEventListener("click", () => findSubtitles(meta, catalogEntry, subtitleArea, subtitleButton, selectedVideoId));
     content.append(subtitleButton, subtitleArea);
+
+    const favoriteButton = document.createElement("button");
+    favoriteButton.type = "button";
+    favoriteButton.className = "save-btn";
+    favoriteButton.id = "toggle-save";
+    favoriteButton.textContent = savedIds.includes("stremio:" + catalogEntry.type + ":" + meta.id)
+      ? "إزالة من مكتبتي" : "＋ أضف إلى مكتبتي";
+    favoriteButton.addEventListener("click", () => toggleFavorite({
+      id:meta.id, type:catalogEntry.type === "anime" ? "anime" : catalogEntry.type,
+      title:meta.name || catalogMeta.name || meta.id, year:meta.year || catalogMeta.year || "",
+      genre:Array.isArray(meta.genres) ? meta.genres.join("، ") : "",
+      poster:meta.poster || catalogMeta.poster || "", meta, addon, catalogEntry
+    }));
+    content.append(favoriteButton);
 
     const streamsButton = document.createElement("button");
     streamsButton.type = "button";
@@ -792,26 +1216,68 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
     streamsButton.textContent = "عرض مصادر التشغيل";
     const streamsArea = document.createElement("div");
     streamsArea.className = "addon-stream-list";
+    let availableStreams = [];
+    const bestButton = document.createElement("button");
+    bestButton.type = "button";
+    bestButton.className = "primary-btn";
+    bestButton.textContent = "تشغيل أفضل مصدر";
+    bestButton.hidden = true;
+    bestButton.addEventListener("click", async () => {
+      bestButton.disabled = true;
+      bestButton.textContent = "جارٍ تجربة أفضل المصادر...";
+      const progressId = catalogEntry.type + ":" + meta.id + ":" + (selectedVideoId || "");
+      const result = await playStreamsWithFallback(availableStreams, 0, heading.textContent, progressId);
+      bestButton.disabled = false;
+      bestButton.textContent = result.success ? "يتم التشغيل · إعادة اختيار أفضل مصدر" : "إعادة تجربة أفضل مصدر";
+      if (!result.success) {
+        const note = document.createElement("p");
+        note.className = "auth-status is-error";
+        note.textContent = "لم ينجح تشغيل أي مصدر. آخر خطأ: " + (result.error?.message || "غير معروف");
+        streamsArea.prepend(note);
+      }
+    });
     streamsButton.addEventListener("click", async () => {
       streamsButton.disabled = true;
       streamsButton.textContent = "جارٍ البحث عن المصادر...";
       streamsArea.replaceChildren();
+      availableStreams = [];
+      bestButton.hidden = true;
       try {
         // Catalog/metadata add-ons are often separate from stream-provider add-ons.
         // Query every enabled add-on that actually declares the stream resource.
         const providers = addons.filter(candidate => candidate.enabled);
+        const sourceProgress = document.createElement("p");
+        sourceProgress.className = "source-fetch-progress";
+        sourceProgress.textContent = "يتم فحص " + providers.length + " إضافة مفعّلة؛ يجري استبعاد الإضافات التي لا تعلن مورد تشغيل.";
+        streamsArea.append(sourceProgress);
+        let completedProviders = 0;
         const settled = await Promise.allSettled(providers.map(async candidate => {
-          const manifest = await fetchAddonResource(candidate, "manifest");
+          const manifest = addonManifestCache.get(candidate.id) ||
+            await withAddonTimeout(fetchAddonResource(candidate, "manifest"), "Manifest · " + (candidate.name || candidate.addon_id));
+          addonManifestCache.set(candidate.id, manifest);
           const resources = Array.isArray(manifest?.resources) ? manifest.resources.map(resource =>
             typeof resource === "string" ? resource : resource?.name
           ) : [];
           if (!resources.includes("stream")) return [];
-          const streamData = await fetchAddonResource(candidate, "stream", catalogEntry.type, meta.id,
-            selectedVideoId ? {videoId:selectedVideoId} : {});
+          const streamData = await withAddonTimeout(
+            fetchAddonResource(candidate, "stream", catalogEntry.type, selectedVideoId || meta.id),
+            "مصدر التشغيل · " + (candidate.name || candidate.addon_id),
+            15000
+          );
           return (Array.isArray(streamData?.streams) ? streamData.streams : [])
             .map(stream => ({...stream, _raifProviderName:candidate.name || candidate.addon_id}));
-        }));
-        const failedProviders = settled.filter(result => result.status === "rejected").length;
+        }).map((promise, index) => promise.then(value => {
+          completedProviders++;
+          sourceProgress.textContent = "تم فحص " + completedProviders + " من " + providers.length + " إضافة...";
+          return value;
+        }).catch(error => {
+          completedProviders++;
+          sourceProgress.textContent = "تم فحص " + completedProviders + " من " + providers.length + " إضافة...";
+          const providerName = providers[index]?.name || providers[index]?.addon_id || "مصدر غير معروف";
+          throw new Error(providerName + ": " + (error?.message || "تعذر الاتصال."));
+        })));
+        const failedResults = settled.filter(result => result.status === "rejected");
+        const failedProviders = failedResults.length;
         const rawStreams = settled.flatMap(result => result.status === "fulfilled" ? result.value : []);
         const streams = rawStreams.filter(stream => {
           const streamLabel = [stream?.name, stream?.title, stream?.description].filter(Boolean).join(" ");
@@ -832,7 +1298,56 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
           if (/\.(mkv|avi|wmv|flv)$/i.test(path)) return 20;
           return 5;
         };
-        streams.sort((a, b) => playbackPriority(a) - playbackPriority(b));
+        const uniqueStreams = new Map();
+        streams.forEach(stream => {
+          try {
+            const normalizedUrl = new URL(stream.url).href;
+            const existing = uniqueStreams.get(normalizedUrl);
+            if (existing) {
+              existing._raifProviders = [...new Set([...(existing._raifProviders || [existing._raifProviderName]), stream._raifProviderName])];
+            } else {
+              stream.url = normalizedUrl;
+              stream._raifProviders = [stream._raifProviderName];
+              uniqueStreams.set(normalizedUrl, stream);
+            }
+          } catch {}
+        });
+        const dedupedStreams = [...uniqueStreams.values()];
+        const qualityRank = stream => {
+          const label = [stream.name,stream.title,stream.description,stream.behaviorHints?.filename].filter(Boolean).join(" ").toLowerCase();
+          if (/2160p|4k|uhd/.test(label)) return 4;
+          if (/1440p|2k/.test(label)) return 3;
+          if (/1080p|fhd/.test(label)) return 2;
+          if (/720p|hd/.test(label)) return 1;
+          if (/480p|sd/.test(label)) return 0;
+          return -1;
+        };
+        const languageRank = stream => {
+          const label = [stream.name,stream.title,stream.description].filter(Boolean).join(" ").toLowerCase();
+          if (/arabic|عربي|العربية|dubbed ar|arab dub/.test(label)) return 3;
+          if (/multi|dual audio|متعدد/.test(label)) return 2;
+          if (/english|انجليزي|إنجليزي/.test(label)) return 1;
+          return 0;
+        };
+        let lastSourceUrl = "";
+        try {
+          lastSourceUrl = JSON.parse(localStorage.getItem("raif-last-source-" +
+            hashPlaybackKey(catalogEntry.type + ":" + meta.id + ":" + (selectedVideoId || ""))) || "{}").url || "";
+        } catch {}
+        dedupedStreams.sort((a,b) => {
+          const ah=getStreamHealth(a.url), bh=getStreamHealth(b.url);
+          const aHealth=(ah.successes||0)*2-(ah.failures||0);
+          const bHealth=(bh.successes||0)*2-(bh.failures||0);
+          const aLast=Number(a.url===lastSourceUrl), bLast=Number(b.url===lastSourceUrl);
+          return (bLast-aLast) ||
+            (qualityRank(b)-qualityRank(a)) ||
+            (languageRank(b)-languageRank(a)) ||
+            (bHealth-aHealth) ||
+            (playbackPriority(a)-playbackPriority(b));
+        });
+        streams.splice(0,streams.length,...dedupedStreams);
+        availableStreams = streams;
+        bestButton.hidden = !streams.length;
         if (!streams.length) {
           const note = document.createElement("p");
           note.textContent = failedProviders && !rawStreams.length
@@ -842,11 +1357,25 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
               : "لم تُرجع إضافات البث المفعّلة روابط لهذا العنوان.";
           streamsArea.append(note);
         }
+        sourceProgress.textContent = "اكتمل الفحص: " + providers.length + " إضافة، " + streams.length + " مصدر تشغيل فريد.";
+        if (failedResults.length) {
+          const errors = document.createElement("details");
+          const summary = document.createElement("summary");
+          summary.textContent = "تفاصيل تعذر الوصول إلى " + failedProviders + " إضافة";
+          errors.append(summary);
+          failedResults.forEach(result => {
+            const item = document.createElement("small");
+            item.className = "is-error";
+            item.textContent = result.reason?.message || "تعذر الاتصال بمصدر.";
+            errors.append(item);
+          });
+          streamsArea.append(errors);
+        }
         streams.forEach((stream, index) => {
           const row = document.createElement("article");
           row.className = "addon-stream-row";
           const name = document.createElement("strong");
-          name.textContent = [stream.name || stream.title || ("مصدر " + (index + 1)), stream._raifProviderName].filter(Boolean).join(" · ");
+          name.textContent = [stream.name || stream.title || ("مصدر " + (index + 1)), (stream._raifProviders || [stream._raifProviderName]).join("، ")].filter(Boolean).join(" · ");
           const description = document.createElement("p");
           description.textContent = stream.description || stream.behaviorHints?.filename || "";
           row.append(name, description);
@@ -872,11 +1401,13 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
                 play.className = "save-btn stream-play-btn";
                 play.textContent = "تشغيل داخل RAIF";
                 play.addEventListener("click", async () => {
-                  try { await openStreamPlayer(target.href, name.textContent, stream); }
-                  catch (error) {
+                  const startIndex = availableStreams.findIndex(item => item.url === stream.url);
+                  const result = await playStreamsWithFallback(availableStreams, Math.max(0,startIndex),
+                    name.textContent, catalogEntry.type + ":" + meta.id + ":" + (selectedVideoId || ""));
+                  if (!result.success) {
                     const note = document.createElement("small");
                     note.className = "is-error";
-                    note.textContent = error.message;
+                    note.textContent = result.error?.message || "تعذر تشغيل المصدر.";
                     row.append(note);
                   }
                 });
@@ -907,8 +1438,21 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
             row.append(note);
           } else if (stream.ytId) {
             const note = document.createElement("small");
-            note.textContent = "هذا المصدر معرّف فيديو خارجي، وليس رابط ملف مباشر.";
-            row.append(note);
+            note.textContent = "فيديو خارجي عبر YouTube.";
+            const playEmbed = document.createElement("button");
+            playEmbed.type = "button";
+            playEmbed.className = "save-btn stream-play-btn";
+            playEmbed.textContent = "تشغيل داخل RAIF";
+            playEmbed.addEventListener("click", async () => {
+              if (!/^[A-Za-z0-9_-]{6,20}$/.test(String(stream.ytId))) {
+                note.textContent = "معرّف الفيديو الخارجي غير صالح.";
+                return;
+              }
+              try {
+                await openEmbedPlayer("https://www.youtube-nocookie.com/embed/" + encodeURIComponent(stream.ytId), name.textContent);
+              } catch (error) { note.textContent = error.message; }
+            });
+            row.append(note, playEmbed);
           }
           streamsArea.append(row);
         });
@@ -922,7 +1466,7 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
         streamsButton.textContent = "تحديث مصادر التشغيل";
       }
     });
-    content.append(streamsButton, streamsArea);
+    content.append(streamsButton, bestButton, streamsArea);
   } catch (error) {
     summary.textContent = "تعذر تحميل التفاصيل: " + error.message;
     summary.classList.add("is-error");
@@ -1064,7 +1608,9 @@ async function updateSource(id, changes) {
     return;
   }
   setStatus(sourceStatus, "تم تحديث حالة المصدر.");
+  resetAddonDiscovery();
   await loadSources();
+  if (activeView !== "library" && activeView !== "sources") loadAddonDiscovery(activeView);
 }
 
 async function deleteSource(id) {
@@ -1074,7 +1620,9 @@ async function deleteSource(id) {
     return;
   }
   setStatus(sourceStatus, "تم حذف المصدر من حسابك.");
+  resetAddonDiscovery();
   await loadSources();
+  if (activeView !== "library" && activeView !== "sources") loadAddonDiscovery(activeView);
 }
 
 document.querySelector("#source-form").addEventListener("submit", async event => {
@@ -1115,7 +1663,9 @@ document.querySelector("#source-form").addEventListener("submit", async event =>
   nameInput.value = "";
   urlInput.value = "";
   setStatus(sourceStatus, "تم حفظ المصدر في حسابك.");
+  resetAddonDiscovery();
   await loadSources();
+  if (activeView !== "library" && activeView !== "sources") loadAddonDiscovery(activeView);
 });
 
 
@@ -1203,7 +1753,9 @@ document.querySelector("#source-import-button").addEventListener("click", async 
     setStatus(status, "اكتمل الفحص: أُضيف " + accepted.length + "، استُبعد " + skipped +
       " غير مناسب، مكرر " + duplicates + "، تعذر فحص " + failed + ".");
     fileInput.value = "";
+    resetAddonDiscovery();
     await loadSources();
+    if (activeView !== "library" && activeView !== "sources") loadAddonDiscovery(activeView);
   } catch (error) {
     setStatus(status, error.message || "تعذر استيراد الملف.", true);
   } finally {
@@ -1223,7 +1775,10 @@ document.querySelector("#close-player").addEventListener("click", () => {
   document.querySelector("#player-dialog").close();
   disposeStreamPlayer();
 });
-document.querySelector("#player-dialog").addEventListener("close", disposeStreamPlayer);
+document.querySelector("#player-dialog").addEventListener("close", () => {
+  activeStreamFallback = null;
+  disposeStreamPlayer();
+});
 
 document.querySelector("#detail-dialog").addEventListener("click", event => {
   if (event.target.id === "detail-dialog") event.currentTarget.close();
@@ -1291,6 +1846,7 @@ document.querySelector("#access-code-form").addEventListener("submit", async eve
     await loadSources();
     render();
     if (activeView !== "library" && activeView !== "sources") await loadAddonDiscovery(activeView);
+
     setStatus(accountStatus, "تم الدخول إلى حساب RAIF المشترك.");
     authDialog.close();
   } catch (error) {
@@ -1309,6 +1865,7 @@ document.querySelector("#sign-out").addEventListener("click", async () => {
   }
   currentUser = null;
   savedIds = [];
+  savedItems = [];
   updateAuthView();
   render();
   setStatus(authStatus, "تم تسجيل الخروج.");
@@ -1331,3 +1888,7 @@ await loadFavorites();
 await loadSources();
 render();
 if (activeView !== "library" && activeView !== "sources") await loadAddonDiscovery(activeView);
+if ("serviceWorker" in navigator && location.protocol === "https:") {
+  navigator.serviceWorker.register("./sw.js", {scope:"./"})
+    .catch(error => console.warn("RAIF PWA registration failed:", error));
+}

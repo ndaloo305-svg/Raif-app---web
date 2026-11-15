@@ -118,7 +118,7 @@ function resourceNames(manifest: Record<string, unknown>): string[] {
 
 function addonEndpoint(manifestUrl: URL, parts: string[], query: Record<string, unknown> = {}): URL {
   const endpoint = new URL(manifestUrl.href);
-  endpoint.search = "";
+  // Keep manifest query parameters: many Stremio add-ons use them for API keys/config.
   endpoint.hash = "";
   endpoint.pathname = endpoint.pathname.replace(/manifest\.json$/i, "");
   if (!endpoint.pathname.endsWith("/")) endpoint.pathname += "/";
