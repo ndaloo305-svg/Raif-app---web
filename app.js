@@ -757,26 +757,43 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
       streamsButton.textContent = "جارٍ البحث عن المصادر...";
       streamsArea.replaceChildren();
       try {
-        const streamData = await fetchAddonResource(addon, "stream", catalogEntry.type, meta.id);
-        const rawStreams = Array.isArray(streamData?.streams) ? streamData.streams : [];
+        // Catalog/metadata add-ons are often separate from stream-provider add-ons.
+        // Query every enabled add-on that actually declares the stream resource.
+        const providers = addons.filter(candidate => candidate.enabled);
+        const settled = await Promise.allSettled(providers.map(async candidate => {
+          const manifest = await fetchAddonResource(candidate, "manifest");
+          const resources = Array.isArray(manifest?.resources) ? manifest.resources.map(resource =>
+            typeof resource === "string" ? resource : resource?.name
+          ) : [];
+          if (!resources.includes("stream")) return [];
+          const streamData = await fetchAddonResource(candidate, "stream", catalogEntry.type, meta.id);
+          return (Array.isArray(streamData?.streams) ? streamData.streams : [])
+            .map(stream => ({...stream, _raifProviderName:candidate.name || candidate.addon_id}));
+        }));
+        const failedProviders = settled.filter(result => result.status === "rejected").length;
+        const rawStreams = settled.flatMap(result => result.status === "fulfilled" ? result.value : []);
         const streams = rawStreams.filter(stream => {
           const streamLabel = [stream?.name, stream?.title, stream?.description].filter(Boolean).join(" ");
           if (/\b(?:torrent|debrid|real[- ]?debrid|peer[- ]?to[- ]?peer|p2p)\b/i.test(streamLabel)) return false;
-          if (stream?.infoHash || stream?.externalUrl || stream?.ytId || stream?.behaviorHints?.notWebReady) return false;
+          if (stream?.infoHash || stream?.behaviorHints?.notWebReady) return false;
           if (typeof stream?.url !== "string") return false;
           try { const url = new URL(stream.url); return url.protocol === "https:" && !url.username && !url.password && !/\.torrent$/i.test(url.pathname); }
           catch { return false; }
         });
         if (!streams.length) {
           const note = document.createElement("p");
-          note.textContent = rawStreams.length ? "لم نجد روابط مباشرة قابلة للتشغيل؛ تم إخفاء التورنت والروابط التي تتطلب خدمة خارجية." : "لم يُرجع هذا المصدر خيارات تشغيل لهذا العنوان.";
+          note.textContent = failedProviders && !rawStreams.length
+            ? "تعذر الاتصال بمصادر البث. تحقق من الإضافات التي توفر التشغيل أو أعد المحاولة."
+            : rawStreams.length
+              ? "المصادر أعادت روابط غير مباشرة أو غير مدعومة في مشغل الويب."
+              : "لم تُرجع إضافات البث المفعّلة روابط لهذا العنوان.";
           streamsArea.append(note);
         }
         streams.forEach((stream, index) => {
           const row = document.createElement("article");
           row.className = "addon-stream-row";
           const name = document.createElement("strong");
-          name.textContent = stream.name || stream.title || ("مصدر " + (index + 1));
+          name.textContent = [stream.name || stream.title || ("مصدر " + (index + 1)), stream._raifProviderName].filter(Boolean).join(" · ");
           const description = document.createElement("p");
           description.textContent = stream.description || stream.behaviorHints?.filename || "";
           row.append(name, description);
