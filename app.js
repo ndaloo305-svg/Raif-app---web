@@ -571,6 +571,89 @@ function renderAddonMessage(message, isError = false) {
   addonCatalogResults.append(note);
 }
 
+function buildAddonConfigForm(addon, manifest, manifestUrl) {
+  const specs = Array.isArray(manifest.config) ? manifest.config.filter(item => item && typeof item === "object") : [];
+  if (!specs.length) return {form:null, missingRequired:false};
+  const form = document.createElement("form");
+  form.className = "addon-extra-form";
+  const heading = document.createElement("strong");
+  heading.textContent = "إعدادات الإضافة";
+  form.append(heading);
+  let missingRequired = false;
+
+  specs.slice(0, 20).forEach(spec => {
+    const key = String(spec.key || spec.name || "").trim();
+    if (!key || !/^[a-zA-Z0-9_-]{1,64}$/.test(key)) return;
+    const required = spec.required === true || spec.isRequired === true;
+    const current = manifestUrl.searchParams.get(key) ?? spec.default ?? "";
+    if (required && !String(current).trim()) missingRequired = true;
+    const label = document.createElement("label");
+    label.textContent = String(spec.title || spec.name || key) + (required ? " *" : "");
+    let field;
+    const kind = String(spec.type || "text").toLowerCase();
+    if (Array.isArray(spec.options) && spec.options.length) {
+      field = document.createElement("select");
+      field.append(new Option(required ? "اختر قيمة" : "القيمة الافتراضية", ""));
+      spec.options.forEach(option => {
+        const value = typeof option === "object" && option !== null
+          ? String(option.value ?? option.key ?? option.name ?? "")
+          : String(option);
+        const caption = typeof option === "object" && option !== null
+          ? String(option.title ?? option.name ?? option.value ?? value)
+          : String(option);
+        field.append(new Option(caption, value));
+      });
+      field.value = String(current);
+    } else {
+      field = document.createElement("input");
+      field.type = ["password","number","email","url"].includes(kind) ? kind : "text";
+      field.value = String(current);
+      if (kind === "checkbox" || kind === "boolean") {
+        field.type = "checkbox";
+        field.checked = /^(true|1|yes|on)$/i.test(String(current));
+      }
+    }
+    field.name = key;
+    field.required = required && field.type !== "checkbox";
+    label.append(field);
+    form.append(label);
+  });
+
+  const save = document.createElement("button");
+  save.type = "submit";
+  save.className = "save-btn";
+  save.textContent = "حفظ إعدادات الإضافة";
+  form.append(save);
+  form.addEventListener("submit", async event => {
+    event.preventDefault();
+    const updatedUrl = new URL(manifestUrl.href);
+    specs.forEach(spec => {
+      const key = String(spec.key || spec.name || "").trim();
+      const field = form.elements.namedItem(key);
+      if (!field) return;
+      const value = field.type === "checkbox" ? String(field.checked) : String(field.value || "").trim();
+      if (value) updatedUrl.searchParams.set(key, value);
+      else updatedUrl.searchParams.delete(key);
+    });
+    save.disabled = true;
+    save.textContent = "جارٍ حفظ الإعدادات...";
+    try {
+      await updateSource(addon.id, {
+        manifest_url:updatedUrl.href,
+        config:{...(addon.config || {}), manifest_configured:true}
+      });
+      const updatedAddon = addons.find(item => item.id === addon.id) || {...addon, manifest_url:updatedUrl.href};
+      await inspectAddon(updatedAddon);
+    } catch (error) {
+      renderAddonMessage("تعذر حفظ إعدادات الإضافة: " + error.message, true);
+    } finally {
+      save.disabled = false;
+      save.textContent = "حفظ إعدادات الإضافة";
+    }
+  });
+  return {form, missingRequired};
+}
+
 async function inspectAddon(addon) {
   if (!addon.enabled) return;
   renderAddonMessage("جارٍ قراءة Manifest للمصدر...");
@@ -622,6 +705,9 @@ async function inspectAddon(addon) {
     heading.append(headingText);
     addonCatalogResults.append(heading);
 
+    const configState = buildAddonConfigForm(addon, manifest, manifestUrl);
+    if (configState.form) addonCatalogResults.append(configState.form);
+
     const catalogButtons = document.createElement("div");
     catalogButtons.className = "addon-catalog-buttons";
     manifest.catalogs.forEach(entry => {
@@ -630,6 +716,7 @@ async function inspectAddon(addon) {
       button.type = "button";
       button.className = "filter";
       button.textContent = entry.name || (entry.type + " · " + entry.id);
+      button.disabled = configState.missingRequired;
       button.addEventListener("click", () => configureAddonCatalog(addon, entry, button));
       catalogButtons.append(button);
     });
