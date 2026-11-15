@@ -1534,10 +1534,6 @@ document.querySelector("#access-code-form").addEventListener("submit", async eve
     render();
     if (activeView !== "library" && activeView !== "sources") await loadAddonDiscovery(activeView);
 
-if ("serviceWorker" in navigator && location.protocol === "https:") {
-  navigator.serviceWorker.register("./sw.js", {scope:"./"})
-    .catch(error => console.warn("RAIF PWA registration failed:", error));
-}
     setStatus(accountStatus, "تم الدخول إلى حساب RAIF المشترك.");
     authDialog.close();
   } catch (error) {
@@ -1579,3 +1575,7 @@ await loadFavorites();
 await loadSources();
 render();
 if (activeView !== "library" && activeView !== "sources") await loadAddonDiscovery(activeView);
+if ("serviceWorker" in navigator && location.protocol === "https:") {
+  navigator.serviceWorker.register("./sw.js", {scope:"./"})
+    .catch(error => console.warn("RAIF PWA registration failed:", error));
+}
