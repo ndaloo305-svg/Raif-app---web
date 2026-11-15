@@ -29,6 +29,42 @@ const accountStatus = document.querySelector("#account-status");
 const sourceStatus = document.querySelector("#source-status");
 const typeNames = {movie:"فيلم",series:"مسلسل",anime:"أنمي"};
 
+const CATALOG_CACHE_VERSION = 1;
+function catalogCacheKey() {
+  return currentUser ? "raif-catalog-cache-v" + CATALOG_CACHE_VERSION + ":" + currentUser.id : null;
+}
+function saveCatalogCache() {
+  const key = catalogCacheKey();
+  if (!key || !addonCatalogItems.length) return;
+  try {
+    const enabledIds = new Set(addons.filter(addon => addon.enabled).map(addon => addon.id));
+    const entries = addonCatalogItems.flatMap(item => item.providers
+      .filter(provider => enabledIds.has(provider.addon.id))
+      .map(provider => ({addonId:provider.addon.id,catalogEntry:provider.catalogEntry,meta:provider.meta})));
+    localStorage.setItem(key, JSON.stringify({version:CATALOG_CACHE_VERSION,savedAt:Date.now(),entries}));
+  } catch (error) {
+    console.warn("RAIF catalog cache could not be saved:", error);
+  }
+}
+function restoreCatalogCache() {
+  addonCatalogItems = [];
+  const key = catalogCacheKey();
+  if (!key) { render(); return; }
+  try {
+    const cached = JSON.parse(localStorage.getItem(key) || "null");
+    if (cached?.version !== CATALOG_CACHE_VERSION || !Array.isArray(cached.entries)) { render(); return; }
+    const enabled = new Map(addons.filter(addon => addon.enabled).map(addon => [addon.id,addon]));
+    cached.entries.forEach(entry => {
+      const addon = enabled.get(entry.addonId);
+      if (addon && entry.catalogEntry && entry.meta) mergeCatalogMeta(addon,entry.catalogEntry,entry.meta);
+    });
+  } catch (error) {
+    console.warn("RAIF catalog cache could not be restored:", error);
+  }
+  render();
+}
+
+
 function setStatus(element, message, isError = false) {
   if (!element) return;
   element.textContent = message;
@@ -263,6 +299,7 @@ async function loadSources() {
     return;
   }
   addons = data || [];
+  restoreCatalogCache();
   if (!addons.length) {
     const message = document.createElement("p");
     message.className = "empty-state";
@@ -398,6 +435,7 @@ async function loadAddonDiscovery(view = activeView) {
           try {
             const data=await withTimeout(fetchAddonResource(addon,"catalog",entry.type,entry.id,{skip:0}),"كتالوج " + (entry.name || entry.id));
             (Array.isArray(data?.metas) ? data.metas : []).forEach(meta => mergeCatalogMeta(addon,entry,meta));
+            saveCatalogCache();
             render();
           } catch(error) {
             addonDiscoveryCache.delete(key);
@@ -412,7 +450,7 @@ async function loadAddonDiscovery(view = activeView) {
     }
   };
   await Promise.all(Array.from({length:Math.min(5,enabled.length)},() => worker()));
-  if (run === addonDiscoveryRun) { addonCatalogLoading=false; render(); renderDiscoveryDiagnostics(); }
+  if (run === addonDiscoveryRun) { saveCatalogCache(); addonCatalogLoading=false; render(); renderDiscoveryDiagnostics(); }
 }
 
 function renderDiscoveryDiagnostics() {
@@ -1053,7 +1091,7 @@ async function updateSource(id, changes) {
   }
   setStatus(sourceStatus, "تم تحديث حالة المصدر.");
   await loadSources();
-  addonDiscoveryCache.clear(); addonManifestCache.clear(); addonCatalogItems = [];
+  addonDiscoveryCache.clear(); addonManifestCache.clear();
   if (activeView !== "sources" && activeView !== "library") loadAddonDiscovery(activeView);
 }
 
@@ -1213,7 +1251,7 @@ document.querySelectorAll(".filter").forEach(button => button.addEventListener("
 
 search.addEventListener("input", render);
 document.querySelector("#refresh-catalog")?.addEventListener("click", () => {
-  addonDiscoveryCache.clear(); addonManifestCache.clear(); addonCatalogItems = []; addonDiscoveryErrors.length = 0;
+  addonDiscoveryCache.clear(); addonManifestCache.clear(); addonDiscoveryErrors.length = 0;
   loadAddonDiscovery(activeView);
 });
 document.querySelector("#close-dialog").addEventListener("click", () => document.querySelector("#detail-dialog").close());
@@ -1288,7 +1326,7 @@ document.querySelector("#access-code-form").addEventListener("submit", async eve
     await loadFavorites();
     await loadSources();
     render();
-    if (activeView !== "library" && activeView !== "sources") await loadAddonDiscovery(activeView);
+    if (activeView !== "library" && activeView !== "sources") void loadAddonDiscovery(activeView);
     setStatus(accountStatus, "تم الدخول إلى حساب RAIF المشترك.");
     authDialog.close();
   } catch (error) {
@@ -1328,4 +1366,4 @@ updateAuthView();
 await loadFavorites();
 await loadSources();
 render();
-if (activeView !== "library" && activeView !== "sources") await loadAddonDiscovery(activeView);
+if (activeView !== "library" && activeView !== "sources") void loadAddonDiscovery(activeView);
