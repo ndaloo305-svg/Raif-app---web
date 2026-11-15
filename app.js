@@ -16,6 +16,7 @@ let favoritesLoading = false;
 let addons = [];
 let addonCatalogItems = [];
 let addonCatalogLoading = false;
+let addonDiscoveryRun = 0;
 const addonDiscoveryCache = new Set();
 const addonManifestCache = new Map();
 const addonLoadErrors = new Map();
@@ -458,6 +459,7 @@ function withAddonTimeout(promise, label, timeoutMs = 11000) {
 
 async function loadAddonDiscovery(view = activeView) {
   if (!currentUser || view === "library" || view === "sources") return;
+  const runId = ++addonDiscoveryRun;
   const wanted = view === "movies" ? ["movie"] :
     view === "series" ? ["series"] :
     view === "anime" ? ["anime", "series"] : ["movie", "series", "anime"];
@@ -530,7 +532,7 @@ async function loadAddonDiscovery(view = activeView) {
   });
 
   await Promise.allSettled(jobs);
-  addonCatalogLoading = false;
+  if (runId === addonDiscoveryRun) addonCatalogLoading = false;
   render();
 }
 
