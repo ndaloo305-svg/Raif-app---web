@@ -242,7 +242,7 @@ async function toggleFavorite(item) {
   const contentType = itemContentType(item);
   let error;
 
-  if (savedIds.includes(item.id)) {
+  if (savedIds.includes(item.identity)) {
     ({ error } = await supabase.from("favorites")
       .delete()
       .eq("user_id", currentUser.id)
@@ -255,11 +255,12 @@ async function toggleFavorite(item) {
       content_id: contentId,
       content_type: contentType,
       metadata: {
-        demo_id: item.id,
+        identity: item.identity,
         title: item.title,
         year: item.year,
         genre: item.genre,
-        catalog_type: item.type
+        catalog_type: item.type,
+        poster: item.poster || ""
       }
     }));
     if (!error) savedIds = [...savedIds, item.identity];
