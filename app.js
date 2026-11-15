@@ -60,7 +60,7 @@ function normalizeTitle(value) {
 }
 
 function catalogIdentity(type, meta) {
-  const ids = [meta?.imdb_id, meta?.imdbId, meta?.tmdb_id, meta?.tmdbId].filter(value => typeof value === "string" && /^(tt\d+|\d+)$/i.test(value.trim()));
+  const ids = [meta?.imdb_id, meta?.imdbId, meta?.tmdb_id, meta?.tmdbId, meta?.id].filter(value => typeof value === "string" && /^(tt\d+|\d+)$/i.test(value.trim()));
   if (ids.length) return type + "|id|" + ids[0].toLowerCase();
   const title = normalizeTitle(meta?.name || meta?.title || meta?.id);
   const year = String(meta?.year || "").match(/\d{4}/)?.[0] || "";
@@ -1036,6 +1036,8 @@ async function updateSource(id, changes) {
   }
   setStatus(sourceStatus, "تم تحديث حالة المصدر.");
   await loadSources();
+  addonDiscoveryCache.clear(); addonManifestCache.clear(); addonCatalogItems = [];
+  if (activeView !== "sources" && activeView !== "library") loadAddonDiscovery(activeView);
 }
 
 async function deleteSource(id) {
@@ -1046,6 +1048,8 @@ async function deleteSource(id) {
   }
   setStatus(sourceStatus, "تم حذف المصدر من حسابك.");
   await loadSources();
+  addonDiscoveryCache.clear(); addonManifestCache.clear(); addonCatalogItems = [];
+  if (activeView !== "sources" && activeView !== "library") loadAddonDiscovery(activeView);
 }
 
 document.querySelector("#source-form").addEventListener("submit", async event => {
@@ -1087,6 +1091,8 @@ document.querySelector("#source-form").addEventListener("submit", async event =>
   urlInput.value = "";
   setStatus(sourceStatus, "تم حفظ المصدر في حسابك.");
   await loadSources();
+  addonDiscoveryCache.clear(); addonManifestCache.clear(); addonCatalogItems = [];
+  if (activeView !== "sources" && activeView !== "library") loadAddonDiscovery(activeView);
 });
 
 
@@ -1189,6 +1195,10 @@ document.querySelectorAll(".filter").forEach(button => button.addEventListener("
 }));
 
 search.addEventListener("input", render);
+document.querySelector("#refresh-catalog")?.addEventListener("click", () => {
+  addonDiscoveryCache.clear(); addonManifestCache.clear(); addonCatalogItems = []; addonDiscoveryErrors.length = 0;
+  loadAddonDiscovery(activeView);
+});
 document.querySelector("#close-dialog").addEventListener("click", () => document.querySelector("#detail-dialog").close());
 document.querySelector("#close-player").addEventListener("click", () => {
   document.querySelector("#player-dialog").close();
