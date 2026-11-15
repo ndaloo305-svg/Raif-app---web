@@ -60,8 +60,10 @@ function normalizeTitle(value) {
 }
 
 function catalogIdentity(type, meta) {
-  const ids = [meta?.imdb_id, meta?.imdbId, meta?.tmdb_id, meta?.tmdbId, meta?.id].filter(value => typeof value === "string" && /^(tt\d+|\d+)$/i.test(value.trim()));
-  if (ids.length) return type + "|id|" + ids[0].toLowerCase();
+  const imdb = [meta?.imdb_id,meta?.imdbId,meta?.id].find(value => typeof value === "string" && /^tt\d+$/i.test(value.trim()));
+  const tmdb = [meta?.tmdb_id,meta?.tmdbId].find(value => value != null && /^\d+$/.test(String(value).trim()));
+  if (imdb) return type + "|imdb|" + imdb.toLowerCase();
+  if (tmdb) return type + "|tmdb|" + String(tmdb).trim();
   const title = normalizeTitle(meta?.name || meta?.title || meta?.id);
   const year = String(meta?.year || "").match(/\d{4}/)?.[0] || "";
   return type + "|title|" + title + "|" + year;
