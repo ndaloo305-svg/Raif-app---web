@@ -4,6 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#101114">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="./app.webmanifest">
+  <link rel="icon" href="./assets/raif-icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./assets/raif-icon.svg">
   <meta name="description" content="RAIF — مكتبتك الترفيهية في مكان واحد">
   <title>RAIF — مكتبتك</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -43,6 +48,7 @@
       </section>
       <section class="content-section">
         <div class="section-heading"><div><span class="eyebrow">مختارة لك</span><h2 id="section-title">اكتشف المحتوى</h2></div><div class="filters" id="filters"><button class="filter active" data-filter="all">الكل</button><button class="filter" data-filter="movie">أفلام</button><button class="filter" data-filter="series">مسلسلات</button><button class="filter" data-filter="anime">أنمي</button></div></div>
+        <p class="catalog-summary" id="catalog-summary" aria-live="polite">تظهر هنا العناوين الحقيقية من مصادر RAIF المفعّلة.</p>
         <div class="catalog-grid" id="catalog" aria-live="polite"></div>
         <p class="empty-state" id="empty" hidden>لا توجد نتائج مطابقة. جرّب كلمة بحث أخرى.</p>
       </section>
@@ -79,7 +85,21 @@
     <button class="dialog-close" id="close-player" aria-label="إغلاق المشغل">×</button>
     <span class="eyebrow">RAIF PLAYER</span>
     <h2 id="player-title">مشغل RAIF</h2>
+    <div class="player-toolbar">
+      <label>السرعة
+        <select id="player-speed">
+          <option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="1.75">1.75×</option><option value="2">2×</option>
+        </select>
+      </label>
+      <label id="player-quality-wrap" hidden>الجودة
+        <select id="player-quality"><option value="-1">تلقائي</option></select>
+      </label>
+      <label>الترجمة
+        <select id="player-subtitles"><option value="-1">إيقاف</option></select>
+      </label>
+    </div>
     <video id="raif-video" controls playsinline preload="metadata"></video>
+    <iframe id="raif-embed" title="مشغل خارجي" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin" hidden></iframe>
     <p id="player-status" class="auth-status" role="status">اختر مصدراً لبدء التشغيل.</p>
     <p class="player-note">يمكن اختيار الترجمة من تفاصيل العنوان قبل بدء المشاهدة.</p>
     <p class="player-note">يدعم المشغل ملفات الفيديو المباشرة وHLS حسب دعم المتصفح والخادم. قد تتطلب بعض الروابط CORS أو ترويسات خاصة.</p>
