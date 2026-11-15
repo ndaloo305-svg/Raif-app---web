@@ -858,11 +858,19 @@ function disposeStreamPlayer() {
   if (activeHlsPlayer) { activeHlsPlayer.destroy(); activeHlsPlayer = null; }
   if (activeDashPlayer) { activeDashPlayer.reset(); activeDashPlayer = null; }
   if (video) {
+    if (currentProgressKey && Number.isFinite(video.currentTime) && video.currentTime > 5) {
+      try { localStorage.setItem(currentProgressKey, JSON.stringify({time:video.currentTime,duration:video.duration,updatedAt:Date.now()})); } catch {}
+    }
     video.pause();
+    video.onerror = null;
+    video.onplaying = null;
+    video.onloadedmetadata = null;
+    video.ontimeupdate = null;
     video.querySelectorAll('track[data-raif-subtitle="true"]').forEach(track => track.remove());
     video.removeAttribute("src");
     video.hidden = false;
     video.load();
+    currentProgressKey = "";
   }
   const embed = document.querySelector("#raif-embed");
   if (embed) { embed.src = "about:blank"; embed.hidden = true; }
@@ -1143,6 +1151,36 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
     streamsButton.textContent = "عرض مصادر التشغيل";
     const streamsArea = document.createElement("div");
     streamsArea.className = "addon-stream-list";
+    let availableStreams = [];
+    const bestButton = document.createElement("button");
+    bestButton.type = "button";
+    bestButton.className = "primary-btn";
+    bestButton.textContent = "تشغيل أفضل مصدر";
+    bestButton.hidden = true;
+    bestButton.addEventListener("click", async () => {
+      bestButton.disabled = true;
+      bestButton.textContent = "جارٍ تجربة أفضل المصادر...";
+      const progressId = catalogEntry.type + ":" + meta.id + ":" + (selectedVideoId || "");
+      let lastError = null;
+      for (const candidate of availableStreams) {
+        try {
+          await openStreamPlayer(candidate.url, candidate.name || candidate.title || "RAIF", candidate, progressId);
+          bestButton.textContent = "يتم التشغيل";
+          return;
+        } catch (error) {
+          lastError = error;
+          const playerDialog = document.querySelector("#player-dialog");
+          if (playerDialog.open) playerDialog.close();
+          disposeStreamPlayer();
+        }
+      }
+      bestButton.disabled = false;
+      bestButton.textContent = "إعادة تجربة أفضل مصدر";
+      const note = document.createElement("p");
+      note.className = "auth-status is-error";
+      note.textContent = "لم ينجح تشغيل أي مصدر. آخر خطأ: " + (lastError?.message || "غير معروف");
+      streamsArea.prepend(note);
+    });
     streamsButton.addEventListener("click", async () => {
       streamsButton.disabled = true;
       streamsButton.textContent = "جارٍ البحث عن المصادر...";
@@ -1228,6 +1266,8 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
             (playbackPriority(a)-playbackPriority(b));
         });
         streams.splice(0,streams.length,...dedupedStreams);
+        availableStreams = streams;
+        bestButton.hidden = !streams.length;
         if (!streams.length) {
           const note = document.createElement("p");
           note.textContent = failedProviders && !rawStreams.length
@@ -1269,6 +1309,9 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
                 play.addEventListener("click", async () => {
                   try { await openStreamPlayer(target.href, name.textContent, stream, catalogEntry.type + ":" + meta.id + ":" + (selectedVideoId || "")); }
                   catch (error) {
+                    const playerDialog = document.querySelector("#player-dialog");
+                    if (playerDialog.open) playerDialog.close();
+                    disposeStreamPlayer();
                     const note = document.createElement("small");
                     note.className = "is-error";
                     note.textContent = error.message;
@@ -1330,7 +1373,7 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
         streamsButton.textContent = "تحديث مصادر التشغيل";
       }
     });
-    content.append(streamsButton, streamsArea);
+    content.append(streamsButton, bestButton, streamsArea);
   } catch (error) {
     summary.textContent = "تعذر تحميل التفاصيل: " + error.message;
     summary.classList.add("is-error");
