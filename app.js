@@ -98,7 +98,7 @@ function render() {
     card.append(label,title,detail); card.addEventListener("click",() => openAddonMeta(item.addon,item.catalogEntry,item.meta,item.providers));
     card.addEventListener("keydown",event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); card.click(); } }); catalog.append(card);
   });
-  const count = document.querySelector("#catalog-count"); if (count) count.textContent = filtered.length ? filtered.length.toLocaleString("ar") + " عنوان موحّد · " + filtered.reduce((sum,item) => sum + item.providers.length,0).toLocaleString("ar") + " نتائج مصادر" : "";
+  const count = document.querySelector("#catalog-count"); if (count) count.textContent = filtered.length.toLocaleString("ar") + " عنوان موحّد · " + filtered.reduce((sum,item) => sum + item.providers.length,0).toLocaleString("ar") + " نتائج مصادر";
   if (activeView === "library" && !currentUser) empty.textContent = "سجّل الدخول أولاً لعرض مكتبتك المحفوظة.";
   else if (activeView === "library") empty.textContent = "المكتبة المحفوظة ستظهر هنا بعد ربط حفظ عناوين الإضافات.";
   else if (!currentUser) empty.textContent = "سجّل الدخول أولاً لتحميل كتالوجات مصادرك.";
@@ -107,6 +107,7 @@ function render() {
   else if (!filtered.length) empty.textContent = "لا توجد عناوين من المصادر المفعّلة لهذا القسم.";
   else empty.textContent = "";
   empty.hidden = filtered.length > 0;
+  renderDiscoveryDiagnostics();
 }
 
 async function loadFavorites() {
@@ -416,8 +417,11 @@ async function loadAddonDiscovery(view = activeView) {
 
 function renderDiscoveryDiagnostics() {
   const panel=document.querySelector("#catalog-diagnostics"); if (!panel) return; panel.replaceChildren();
-  const heading=document.createElement("strong"); heading.textContent="حالة جلب الكتالوجات";
-  const summary=document.createElement("span"); summary.textContent=addonCatalogItems.length.toLocaleString("ar") + " عنوان موحّد من " + addons.filter(addon => addon.enabled).length.toLocaleString("ar") + " مصدر مفعّل.";
+  const heading=document.createElement("strong"); heading.textContent="حالة الكتالوج والمصادر";
+  const summary=document.createElement("span");
+  if (!currentUser) summary.textContent="سجّل الدخول لتحميل كتالوجات المصادر وعرض العناوين الحقيقية.";
+  else if (addonCatalogLoading) summary.textContent="جارٍ جلب الكتالوجات تدريجياً من " + addons.filter(addon => addon.enabled).length.toLocaleString("ar") + " مصدر مفعّل…";
+  else summary.textContent=addonCatalogItems.length.toLocaleString("ar") + " عنواناً موحّداً جُلبت من " + addons.filter(addon => addon.enabled).length.toLocaleString("ar") + " مصدر مفعّل.";
   panel.append(heading,summary);
   if (addonDiscoveryErrors.length) {
     const details=document.createElement("details"); const label=document.createElement("summary"); label.textContent="تعذّر تحميل " + addonDiscoveryErrors.length + " طلباً — اضغط للتفاصيل"; details.append(label);
