@@ -893,6 +893,21 @@ function hashPlaybackKey(value) {
   return (hash >>> 0).toString(36);
 }
 
+function getStreamHealth(url) {
+  try { return JSON.parse(localStorage.getItem("raif-stream-health-" + hashPlaybackKey(url)) || "{}"); }
+  catch { return {}; }
+}
+
+function recordStreamHealth(url, success) {
+  const previous = getStreamHealth(url);
+  const next = {
+    successes:(previous.successes || 0) + (success ? 1 : 0),
+    failures:(previous.failures || 0) + (success ? 0 : 1),
+    lastSuccess:success ? Date.now() : (previous.lastSuccess || 0)
+  };
+  try { localStorage.setItem("raif-stream-health-" + hashPlaybackKey(url), JSON.stringify(next)); } catch {}
+}
+
 async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}, progressIdentity = "") {
   let target;
   try { target = new URL(rawUrl); } catch { throw new Error("رابط التشغيل غير صالح."); }
@@ -926,8 +941,32 @@ async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}, prog
   const mediaHint = (target.pathname + " " + filename).toLowerCase();
   const isHls = /\.m3u8(?:$|[?#\s])/.test(mediaHint) || /mpegurl|vnd\.apple\.mpegurl/.test(mime);
   const isDash = /\.mpd(?:$|[?#\s])/.test(mediaHint) || /dash\+xml/.test(mime);
-  video.onerror = () => { status.textContent = "تعذر تشغيل الرابط. قد يكون الرابط منتهيًا أو يتطلب CORS أو ترويسات لا يدعمها المتصفح."; status.classList.add("is-error"); };
-  video.onplaying = () => { status.textContent = "يتم التشغيل داخل RAIF."; status.classList.remove("is-error"); };
+  let playbackSettled = false;
+  let resolvePlayback, rejectPlayback;
+  const playbackReady = new Promise((resolve, reject) => { resolvePlayback = resolve; rejectPlayback = reject; });
+  const playbackTimeout = setTimeout(() => failPlayback("انتهت مهلة تشغيل هذا المصدر."), 30000);
+  const markPlaying = () => {
+    if (playbackSettled) return;
+    playbackSettled = true;
+    clearTimeout(playbackTimeout);
+    resolvePlayback();
+  };
+  const failPlayback = message => {
+    status.textContent = message;
+    status.classList.add("is-error");
+    recordStreamHealth(target.href, false);
+    if (playbackSettled) return;
+    playbackSettled = true;
+    clearTimeout(playbackTimeout);
+    rejectPlayback(new Error(message));
+  };
+  video.onerror = () => failPlayback("تعذر تشغيل الرابط. قد يكون منتهيًا أو يتطلب CORS أو ترويسات لا يدعمها المتصفح.");
+  video.onplaying = () => {
+    status.textContent = "يتم التشغيل داخل RAIF.";
+    status.classList.remove("is-error");
+    recordStreamHealth(target.href, true);
+    markPlaying();
+  };
   video.onloadedmetadata = () => {
     try {
       const saved = JSON.parse(localStorage.getItem(currentProgressKey) || "null");
@@ -951,10 +990,14 @@ async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}, prog
     } catch {}
   };
   const startPlayback = () => video.play().catch(error => {
-    status.textContent = error?.name === "NotSupportedError"
-      ? "صيغة الفيديو غير مدعومة في متصفحك. اختر رابط HLS أو MP4 من المصادر."
-      : "تعذر بدء التشغيل تلقائياً؛ اضغط زر التشغيل داخل الفيديو.";
-    status.classList.add("is-error");
+    if (error?.name === "NotAllowedError") {
+      status.textContent = "اضغط زر التشغيل داخل الفيديو لبدء المشاهدة.";
+      status.classList.remove("is-error");
+    } else {
+      failPlayback(error?.name === "NotSupportedError"
+        ? "صيغة الفيديو غير مدعومة في متصفحك."
+        : "تعذر بدء تشغيل هذا المصدر.");
+    }
   });
   if (isHls && video.canPlayType("application/vnd.apple.mpegurl")) {
     video.src = target.href;
@@ -989,9 +1032,9 @@ async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}, prog
         });
       });
       activeHlsPlayer.on(Hls.Events.ERROR, (_event, data) => {
-        if (data.fatal) { status.textContent = "تعذر تشغيل HLS. تحقق من الرابط ودعم CORS."; status.classList.add("is-error"); }
+        if (data.fatal) failPlayback("تعذر تشغيل HLS. قد يكون الرابط منتهيًا أو يمنع الخادم الوصول (CORS).");
       });
-    } catch (error) { status.textContent = "تعذر تجهيز HLS: " + error.message; status.classList.add("is-error"); }
+    } catch (error) { failPlayback("تعذر تجهيز HLS: " + error.message); }
   } else if (isDash) {
     try {
       const module = await import("https://esm.sh/dashjs@5.0.3");
@@ -999,17 +1042,17 @@ async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}, prog
       activeDashPlayer = dashjs.MediaPlayer().create();
       activeDashPlayer.initialize(video, target.href, false);
       activeDashPlayer.on(dashjs.MediaPlayer.events.ERROR, () => {
-        status.textContent = "تعذر تشغيل DASH. تحقق من الرابط ودعم CORS.";
-        status.classList.add("is-error");
+        failPlayback("تعذر تشغيل DASH. تحقق من الرابط ودعم CORS.");
       });
       status.textContent = "تم تحميل مشغل DASH. جارٍ التشغيل...";
       startPlayback();
-    } catch (error) { status.textContent = "تعذر تجهيز DASH: " + error.message; status.classList.add("is-error"); }
+    } catch (error) { failPlayback("تعذر تجهيز DASH: " + error.message); }
   } else {
     video.src = target.href;
     status.textContent = "جارٍ بدء تشغيل الفيديو...";
     startPlayback();
   }
+  await playbackReady;
 }
 
 async function openAddonMeta(addon, catalogEntry, catalogMeta) {
@@ -1109,13 +1152,17 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
         // Query every enabled add-on that actually declares the stream resource.
         const providers = addons.filter(candidate => candidate.enabled);
         const settled = await Promise.allSettled(providers.map(async candidate => {
-          const manifest = await fetchAddonResource(candidate, "manifest");
+          const manifest = addonManifestCache.get(candidate.id) ||
+            await withAddonTimeout(fetchAddonResource(candidate, "manifest"), "Manifest · " + (candidate.name || candidate.addon_id));
           const resources = Array.isArray(manifest?.resources) ? manifest.resources.map(resource =>
             typeof resource === "string" ? resource : resource?.name
           ) : [];
           if (!resources.includes("stream")) return [];
-          const streamData = await fetchAddonResource(candidate, "stream", catalogEntry.type, meta.id,
-            selectedVideoId ? {videoId:selectedVideoId} : {});
+          const streamData = await withAddonTimeout(
+            fetchAddonResource(candidate, "stream", catalogEntry.type, selectedVideoId || meta.id),
+            "مصدر التشغيل · " + (candidate.name || candidate.addon_id),
+            15000
+          );
           return (Array.isArray(streamData?.streams) ? streamData.streams : [])
             .map(stream => ({...stream, _raifProviderName:candidate.name || candidate.addon_id}));
         }));
@@ -1140,7 +1187,47 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
           if (/\.(mkv|avi|wmv|flv)$/i.test(path)) return 20;
           return 5;
         };
-        streams.sort((a, b) => playbackPriority(a) - playbackPriority(b));
+        const uniqueStreams = new Map();
+        streams.forEach(stream => {
+          try {
+            const normalizedUrl = new URL(stream.url).href;
+            const existing = uniqueStreams.get(normalizedUrl);
+            if (existing) {
+              existing._raifProviders = [...new Set([...(existing._raifProviders || [existing._raifProviderName]), stream._raifProviderName])];
+            } else {
+              stream.url = normalizedUrl;
+              stream._raifProviders = [stream._raifProviderName];
+              uniqueStreams.set(normalizedUrl, stream);
+            }
+          } catch {}
+        });
+        const dedupedStreams = [...uniqueStreams.values()];
+        const qualityRank = stream => {
+          const label = [stream.name,stream.title,stream.description,stream.behaviorHints?.filename].filter(Boolean).join(" ").toLowerCase();
+          if (/2160p|4k|uhd/.test(label)) return 4;
+          if (/1440p|2k/.test(label)) return 3;
+          if (/1080p|fhd/.test(label)) return 2;
+          if (/720p|hd/.test(label)) return 1;
+          if (/480p|sd/.test(label)) return 0;
+          return -1;
+        };
+        const languageRank = stream => {
+          const label = [stream.name,stream.title,stream.description].filter(Boolean).join(" ").toLowerCase();
+          if (/arabic|عربي|العربية|dubbed ar|arab dub/.test(label)) return 3;
+          if (/multi|dual audio|متعدد/.test(label)) return 2;
+          if (/english|انجليزي|إنجليزي/.test(label)) return 1;
+          return 0;
+        };
+        dedupedStreams.sort((a,b) => {
+          const ah=getStreamHealth(a.url), bh=getStreamHealth(b.url);
+          const aHealth=(ah.successes||0)*2-(ah.failures||0);
+          const bHealth=(bh.successes||0)*2-(bh.failures||0);
+          return (qualityRank(b)-qualityRank(a)) ||
+            (languageRank(b)-languageRank(a)) ||
+            (bHealth-aHealth) ||
+            (playbackPriority(a)-playbackPriority(b));
+        });
+        streams.splice(0,streams.length,...dedupedStreams);
         if (!streams.length) {
           const note = document.createElement("p");
           note.textContent = failedProviders && !rawStreams.length
@@ -1154,7 +1241,7 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
           const row = document.createElement("article");
           row.className = "addon-stream-row";
           const name = document.createElement("strong");
-          name.textContent = [stream.name || stream.title || ("مصدر " + (index + 1)), stream._raifProviderName].filter(Boolean).join(" · ");
+          name.textContent = [stream.name || stream.title || ("مصدر " + (index + 1)), (stream._raifProviders || [stream._raifProviderName]).join("، ")].filter(Boolean).join(" · ");
           const description = document.createElement("p");
           description.textContent = stream.description || stream.behaviorHints?.filename || "";
           row.append(name, description);
