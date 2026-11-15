@@ -15,7 +15,7 @@ python3 -m http.server 8000
 ## المنفذ
 - واجهة عربية RTL بتصميم متجاوب.
 - كتالوج موحّد يجمع عناوين الإضافات المفعّلة تدريجيًا مع دمج التكرار بالمعرّفات الشائعة والعنوان والسنة.
-- تسجيل دخول بالبريد عبر رابط سحري باستخدام Supabase Auth.
+- تسجيل دخول برمز RAIF الدائم عبر Edge Function، مع جلسة Supabase Auth.
 - مزامنة مكتبة العناوين الحقيقية في جدول `public.favorites` بمشروع RAIF Web Supabase.
 - إدارة روابط Manifest الخاصة بإضافات Stremio عبر `public.user_addons`، وقراءة الكتالوجات وتفاصيل العناوين وخيارات التشغيل التي تعلنها الإضافة.
 - بيانات الإضافات والمفضلة مرتبطة بالمستخدم، وتخضع لسياسات RLS الموجودة في قاعدة البيانات.
@@ -24,15 +24,13 @@ python3 -m http.server 8000
 
 ## إعداد تسجيل الدخول
 
-في Supabase Dashboard للمشروع `puhipyjljmbvczijtzkb`:
-1. افتح Authentication ثم URL Configuration.
-2. أضف رابط الموقع المنشور إلى قائمة Redirect URLs، وأضف رابط التطوير المحلي عند الحاجة.
-3. تأكد من إعداد Site URL وقالب البريد الإلكتروني لإرسال رابط الدخول.
+يتم التحقق من رمز RAIF الدائم عبر `raif-code-login` في مشروع RAIF Web، ولا يُطلب من المستخدم تسجيل الدخول بالبريد أو إدخال كلمة مرور.
 
 المفتاح الموجود في الواجهة هو Publishable Key فقط، وهو مخصص للاستخدام من المتصفح مع RLS.
 
 ## حدود النسخة الحالية
 - لا يعرض RAIF عناوين تجريبية؛ تُجمع الكتالوجات الحقيقية من الإضافات المفعّلة وتظهر تدريجيًا في تبويبات المحتوى بعد تسجيل الدخول.
+- دمج التكرار يعتمد IMDb/TMDB متى توفرت المعرفات، وإلا يستخدم عنوانًا وسنة بعد التطبيع النصي؛ التطابق العربي/الإنجليزي لا يمكن ضمانه دون معرّف مشترك.
 - استيراد JSON يفحص Manifest عبر Edge Function خاصة بالمشروع، ويستبعد إضافات Torrent وDebrid المعروفة، ويحفظ موارد الكتالوجات والترجمات. طلبات Manifest والكتالوجات والتفاصيل والتدفقات والترجمات تمر عبر وسيط موثّق يتحقق من ملكية المصدر وفق RLS، ولا تحتاج خوادم الإضافات إلى CORS لهذه الطلبات.
 - تمت إضافة البحث عن الترجمات من تفاصيل العنوان لمصادر Subtito وSubSource وSubDL وSubMaker وOpenSubtitles، مع تحميل ملفات الترجمة عبر الوسيط وتحويل SRT إلى WebVTT.
 - مشغل RAIF يدعم روابط MP4/WebM المباشرة وHLS عبر hls.js، مع اختيار سرعة التشغيل وجودة HLS ومسارات الترجمة، وحفظ موضع المشاهدة محليًا. قد تتطلب HLS وDASH ترويسات CORS من خادم الوسائط نفسه. يتم إخفاء روابط Torrent والروابط الخارجية والروابط التي تعلن أنها غير جاهزة للويب. لا يوجد دعم DRM أو الروابط التي تتطلب ترويسات مخصصة أو تشغيل Torrent.
@@ -49,7 +47,9 @@ The source manager reads enabled add-on HTTPS Manifests, lists declared catalogs
 - Catalog, metadata, stream-list and subtitle discovery requests pass through the authenticated `raif-addon-proxy` Edge Function; browser CORS on the add-on API is not required for these JSON requests.
 - Only HTTPS Manifest and poster URLs are accepted.
 - Responses are limited to 1.5 MB and requests time out after 12 seconds.
-- Catalog browsing supports required and optional extra parameters declared by the add-on. Direct HTTP(S) video and HLS playback are implemented. Torrent, DASH, DRM, and sources requiring custom headers are not supported yet.
+- Catalog browsing supports manifest-level configuration parameters and required/optional catalog extras. The proxy preserves manifest query parameters so configured add-ons can authenticate requests.
+- Stream lists are deduplicated by normalized URL and ranked by quality, language, previous playback success, and format. A best-source action retries the next compatible source if playback fails to start.
+- The player supports direct MP4/WebM, HLS quality and subtitle tracks, external YouTube embeds, playback speed, keyboard shortcuts, and local resume position. DRM, Torrent engines, and sources requiring custom headers are not supported.
 
 
 ## PWA
