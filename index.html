@@ -43,6 +43,7 @@
       </section>
       <section class="content-section">
         <div class="section-heading"><div><span class="eyebrow">مختارة لك</span><h2 id="section-title">اكتشف المحتوى</h2></div><div class="filters" id="filters"><button class="filter active" data-filter="all">الكل</button><button class="filter" data-filter="movie">أفلام</button><button class="filter" data-filter="series">مسلسلات</button><button class="filter" data-filter="anime">أنمي</button></div></div>
+        <p class="catalog-summary" id="catalog-summary" aria-live="polite">تظهر هنا العناوين الحقيقية من مصادر RAIF المفعّلة.</p>
         <div class="catalog-grid" id="catalog" aria-live="polite"></div>
         <p class="empty-state" id="empty" hidden>لا توجد نتائج مطابقة. جرّب كلمة بحث أخرى.</p>
       </section>
@@ -79,6 +80,19 @@
     <button class="dialog-close" id="close-player" aria-label="إغلاق المشغل">×</button>
     <span class="eyebrow">RAIF PLAYER</span>
     <h2 id="player-title">مشغل RAIF</h2>
+    <div class="player-toolbar">
+      <label>السرعة
+        <select id="player-speed">
+          <option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="1.75">1.75×</option><option value="2">2×</option>
+        </select>
+      </label>
+      <label id="player-quality-wrap" hidden>الجودة
+        <select id="player-quality"><option value="-1">تلقائي</option></select>
+      </label>
+      <label>الترجمة
+        <select id="player-subtitles"><option value="-1">إيقاف</option></select>
+      </label>
+    </div>
     <video id="raif-video" controls playsinline preload="metadata"></video>
     <p id="player-status" class="auth-status" role="status">اختر مصدراً لبدء التشغيل.</p>
     <p class="player-note">يمكن اختيار الترجمة من تفاصيل العنوان قبل بدء المشاهدة.</p>
