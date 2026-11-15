@@ -971,6 +971,7 @@ async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}, prog
   const isHls = /\.m3u8(?:$|[?#\s])/.test(mediaHint) || /mpegurl|vnd\.apple\.mpegurl/.test(mime);
   const isDash = /\.mpd(?:$|[?#\s])/.test(mediaHint) || /dash\+xml/.test(mime);
   let playbackSettled = false;
+  let playbackFailureRecorded = false;
   let resolvePlayback, rejectPlayback;
   const playbackReady = new Promise((resolve, reject) => { resolvePlayback = resolve; rejectPlayback = reject; });
   const playbackTimeout = setTimeout(() => failPlayback("انتهت مهلة تشغيل هذا المصدر."), 30000);
@@ -981,10 +982,12 @@ async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}, prog
     resolvePlayback();
   };
   const failPlayback = message => {
-    if (playbackSettled) return;
+    if (playbackFailureRecorded) return;
+    playbackFailureRecorded = true;
     status.textContent = message;
     status.classList.add("is-error");
     recordStreamHealth(target.href, false);
+    if (playbackSettled) return;
     playbackSettled = true;
     clearTimeout(playbackTimeout);
     rejectPlayback(new Error(message));
