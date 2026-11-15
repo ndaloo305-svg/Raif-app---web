@@ -539,6 +539,7 @@ async function loadAddonDiscovery(view = activeView) {
 document.querySelector("#player-speed")?.addEventListener("change", event => {
   const video = document.querySelector("#raif-video");
   video.playbackRate = Number(event.target.value) || 1;
+  localStorage.setItem("raif-player-speed", String(video.playbackRate));
 });
 document.querySelector("#player-quality")?.addEventListener("change", event => {
   if (activeHlsPlayer) activeHlsPlayer.currentLevel = Number(event.target.value);
@@ -773,9 +774,29 @@ function disposeStreamPlayer() {
     video.pause();
     video.querySelectorAll('track[data-raif-subtitle="true"]').forEach(track => track.remove());
     video.removeAttribute("src");
+    video.hidden = false;
     video.load();
   }
+  const embed = document.querySelector("#raif-embed");
+  if (embed) { embed.src = "about:blank"; embed.hidden = true; }
 }
+async function openEmbedPlayer(rawUrl, title = "RAIF Player") {
+  const target = new URL(rawUrl);
+  const allowed = ["www.youtube-nocookie.com","www.youtube.com","youtube.com","youtu.be","player.vimeo.com","vimeo.com"];
+  if (!allowed.includes(target.hostname.toLowerCase())) throw new Error("هذا الموقع غير موجود ضمن منصات التضمين المسموحة.");
+  if (target.protocol !== "https:") throw new Error("التضمين يتطلب رابط HTTPS.");
+  const dialog = document.querySelector("#player-dialog");
+  const video = document.querySelector("#raif-video");
+  const embed = document.querySelector("#raif-embed");
+  disposeStreamPlayer();
+  video.hidden = true;
+  embed.hidden = false;
+  embed.src = target.href;
+  document.querySelector("#player-title").textContent = title;
+  setStatus(document.querySelector("#player-status"), "يتم عرض المشغل الخارجي. الترجمة وإعدادات الجودة تخضع للمنصة.");
+  dialog.showModal();
+}
+
 function hashPlaybackKey(value) {
   let hash = 2166136261;
   for (let index = 0; index < value.length; index++) {
@@ -785,13 +806,14 @@ function hashPlaybackKey(value) {
   return (hash >>> 0).toString(36);
 }
 
-async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}) {
+async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}, progressIdentity = "") {
   let target;
   try { target = new URL(rawUrl); } catch { throw new Error("رابط التشغيل غير صالح."); }
   if (!["https:", "http:"].includes(target.protocol) || target.username || target.password) throw new Error("المشغل يقبل روابط HTTP وHTTPS فقط.");
   if (target.protocol === "http:" && location.protocol === "https:") throw new Error("المتصفح يمنع تشغيل HTTP داخل صفحة HTTPS. استخدم رابط HTTPS.");
   const dialog = document.querySelector("#player-dialog");
   const video = document.querySelector("#raif-video");
+  const embed = document.querySelector("#raif-embed");
   const status = document.querySelector("#player-status");
   const qualityWrap = document.querySelector("#player-quality-wrap");
   const qualitySelect = document.querySelector("#player-quality");
@@ -801,12 +823,15 @@ async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}) {
   if (qualityWrap) qualityWrap.hidden = true;
   if (qualitySelect) qualitySelect.replaceChildren(new Option("تلقائي", "-1"));
   if (subtitleSelect) subtitleSelect.replaceChildren(new Option("إيقاف", "-1"));
-  if (speedSelect) speedSelect.value = "1";
-  currentProgressKey = "raif-progress-" + hashPlaybackKey(title + "|" + target.href);
+  if (speedSelect) speedSelect.value = localStorage.getItem("raif-player-speed") || "1";
+  video.hidden = false;
+  if (embed) { embed.src = "about:blank"; embed.hidden = true; }
+  currentProgressKey = "raif-progress-" + hashPlaybackKey(progressIdentity || title);
   lastProgressSavedAt = 0;
   status.textContent = "جارٍ تجهيز المشغل...";
   status.classList.remove("is-error");
   disposeStreamPlayer();
+  video.playbackRate = Number(speedSelect?.value || 1);
   applySelectedSubtitle(video);
   dialog.showModal();
   const mime = String(stream.behaviorHints?.mimeType || stream.mimeType || stream.type || "").toLowerCase();
@@ -1068,7 +1093,7 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
                 play.className = "save-btn stream-play-btn";
                 play.textContent = "تشغيل داخل RAIF";
                 play.addEventListener("click", async () => {
-                  try { await openStreamPlayer(target.href, name.textContent, stream); }
+                  try { await openStreamPlayer(target.href, name.textContent, stream, catalogEntry.type + ":" + meta.id + ":" + (selectedVideoId || "")); }
                   catch (error) {
                     const note = document.createElement("small");
                     note.className = "is-error";
@@ -1103,8 +1128,21 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta) {
             row.append(note);
           } else if (stream.ytId) {
             const note = document.createElement("small");
-            note.textContent = "هذا المصدر معرّف فيديو خارجي، وليس رابط ملف مباشر.";
-            row.append(note);
+            note.textContent = "فيديو خارجي عبر YouTube.";
+            const playEmbed = document.createElement("button");
+            playEmbed.type = "button";
+            playEmbed.className = "save-btn stream-play-btn";
+            playEmbed.textContent = "تشغيل داخل RAIF";
+            playEmbed.addEventListener("click", async () => {
+              if (!/^[A-Za-z0-9_-]{6,20}$/.test(String(stream.ytId))) {
+                note.textContent = "معرّف الفيديو الخارجي غير صالح.";
+                return;
+              }
+              try {
+                await openEmbedPlayer("https://www.youtube-nocookie.com/embed/" + encodeURIComponent(stream.ytId), name.textContent);
+              } catch (error) { note.textContent = error.message; }
+            });
+            row.append(note, playEmbed);
           }
           streamsArea.append(row);
         });
