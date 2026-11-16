@@ -44,16 +44,15 @@ python3 -m http.server 8000
 
 ## Stremio catalog browsing
 
-The source manager reads enabled add-on HTTPS Manifests through the authenticated RAIF proxy, lists declared catalogs, supports their extra parameters, displays metadata details, and lists stream options returned by the add-on. Direct video, HLS and DASH stream URLs can be played in RAIF’s in-page player when supported by the browser and source server.
+The source manager reads enabled add-on HTTPS Manifests through the authenticated RAIF proxy, lists declared catalogs, supports their extra parameters, displays metadata details, and lists stream options returned by the add-on. RAIF is being prepared to use playback links supplied by the project owner, with direct video, HLS and DASH playback when supported by the browser and source server.
 
 - Only HTTPS Manifest, poster and stream URLs are accepted for embedded playback.
 - Requests are routed through the RAIF Supabase Edge Function proxy; the source server does not need to expose browser CORS to the client for proxied metadata requests.
 - Catalog browsing supports required and optional extra parameters declared by the add-on.
-- Title details now include a JustWatch Saudi Arabia search link to find licensed subscription, rental, purchase and free-with-ads availability. This is a discovery link, not an embedded stream or a guarantee that a provider carries the title.
 - The source manager includes a live Manifest health check that reports catalog count and whether the add-on declares stream and subtitle resources.
 - Direct playback is possible only when a source returns a browser-compatible authorized URL. DRM, torrent and sources requiring custom headers are not supported.
 
 
-## Legal streaming discovery
+## Playback links
 
-RAIF separates metadata/catalog sources from playback providers. It does not scrape, proxy or publish unauthorized stream URLs. JustWatch is linked as a legal availability guide for Saudi Arabia; TMDB's Watch Providers API can be added when a TMDB API credential and the required JustWatch attribution are configured. TMDB's provider data indicates where titles are available but does not itself provide direct playback URLs.
+RAIF does not need a discovery directory for streaming platforms. Playback links will be supplied by the project owner and organized against the matching movie or series episode. The player will validate supported URL formats and browser compatibility, and report failures clearly. A URL being saved does not by itself guarantee that the host allows browser playback; HLS/DASH may require appropriate CORS support, and DRM or custom-header-only streams are not supported by the current web player.
