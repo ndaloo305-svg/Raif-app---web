@@ -422,6 +422,31 @@ function openDetail(id) {
   document.querySelector("#detail-dialog").showModal();
 }
 
+async function testAddonConnection(addon,button,status){
+  button.disabled=true;button.textContent="جارٍ الفحص...";
+  status.textContent="جارٍ الاتصال بالمصدر عبر وسيط RAIF...";
+  status.className="source-health";
+  try{
+    addonManifestCache.delete(addon.id);
+    const manifest=await fetchAddonResource(addon,"manifest");
+    if(!manifest||!Array.isArray(manifest.resources)||!Array.isArray(manifest.catalogs))throw new Error("Manifest غير صالح أو لا يطابق بنية Stremio.");
+    const resources=manifest.resources.map(resource=>typeof resource==="string"?resource:resource?.name).filter(Boolean);
+    const catalogCount=manifest.catalogs.filter(entry=>entry?.id&&entry?.type).length;
+    const supportsStreams=resources.includes("stream");
+    const supportsSubtitles=resources.includes("subtitles");
+    const parts=["اتصال ناجح",catalogCount+" كتالوج"];
+    parts.push(supportsStreams?"يوفر روابط تشغيل":"لا يوفر تشغيل");
+    if(supportsSubtitles)parts.push("يوفر ترجمات");
+    status.textContent=parts.join(" · ");
+    status.classList.add("is-online");
+  }catch(error){
+    status.textContent="فشل الفحص: "+error.message;
+    status.classList.add("is-error");
+  }finally{
+    button.disabled=false;button.textContent="فحص المصدر";
+  }
+}
+
 async function loadSources() {
   const list = document.querySelector("#source-list");
   list.replaceChildren();
@@ -469,8 +494,15 @@ async function loadSources() {
     details.append(name, url);
     identity.append(details);
 
+    const health=document.createElement("p");
+    health.className="source-health";
+    health.textContent="لم يتم فحص الاتصال بعد.";
+    card.append(identity,health);
     const actions = document.createElement("div");
     actions.className = "source-actions";
+    const check=document.createElement("button");
+    check.className="save-btn";check.type="button";check.textContent="فحص المصدر";
+    check.addEventListener("click",()=>testAddonConnection(addon,check,health));
     const browse = document.createElement("button");
     browse.className = "save-btn";
     browse.type = "button";
@@ -487,7 +519,7 @@ async function loadSources() {
     remove.type = "button";
     remove.textContent = "حذف";
     remove.addEventListener("click", () => deleteSource(addon.id));
-    actions.append(browse, toggle, remove);
+    actions.append(check,browse, toggle, remove);
     card.append(identity, actions);
     list.append(card);
   });
