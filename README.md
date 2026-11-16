@@ -50,6 +50,7 @@ The source manager reads enabled add-on HTTPS Manifests through the authenticate
 - Requests are routed through the RAIF Supabase Edge Function proxy; the source server does not need to expose browser CORS to the client for proxied metadata requests.
 - Catalog browsing supports required and optional extra parameters declared by the add-on.
 - Title details now include a JustWatch Saudi Arabia search link to find licensed subscription, rental, purchase and free-with-ads availability. This is a discovery link, not an embedded stream or a guarantee that a provider carries the title.
+- The source manager includes a live Manifest health check that reports catalog count and whether the add-on declares stream and subtitle resources.
 - Direct playback is possible only when a source returns a browser-compatible authorized URL. DRM, torrent and sources requiring custom headers are not supported.
 
 
