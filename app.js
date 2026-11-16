@@ -214,8 +214,41 @@ function renderContinueWatching(){
   });
 }
  
+function renderRecommendations(){
+  const section=document.querySelector("#recommendations");
+  const host=document.querySelector("#recommendations-list");
+  if(!section||!host)return;
+  host.replaceChildren();
+  const seedIds=new Set([...savedIds,...watchedRecords.map(record=>record.identity)]);
+  const seeds=addonCatalogItems.filter(item=>seedIds.has(item.identity));
+  const genreWeights=new Map();
+  seeds.forEach(item=>getItemGenres(item).forEach(genre=>{
+    const key=normalizeTitle(genre);
+    if(key)genreWeights.set(key,(genreWeights.get(key)||0)+1);
+  }));
+  const suggestions=addonCatalogItems.filter(item=>!seedIds.has(item.identity)&&!isTitleWatched(item))
+    .map(item=>({item,score:getItemGenres(item).reduce((sum,genre)=>sum+(genreWeights.get(normalizeTitle(genre))||0),0)}))
+    .filter(entry=>entry.score>0)
+    .sort((a,b)=>b.score-a.score||(Number.parseInt(b.item.year,10)||0)-(Number.parseInt(a.item.year,10)||0))
+    .slice(0,6);
+  section.hidden=activeView!=="home"||suggestions.length===0;
+  suggestions.forEach(({item})=>{
+    const card=document.createElement("article");card.className="media-card recommendation-card";card.tabIndex=0;card.setAttribute("role","button");card.setAttribute("aria-label","تفاصيل "+item.title);
+    const poster=document.createElement("div");poster.className="poster";
+    const url=safeAddonAssetUrl(item.poster,item.addon.manifest_url);
+    if(url){const img=document.createElement("img");img.src=url.href;img.alt="";img.loading="lazy";img.referrerPolicy="no-referrer";img.onerror=()=>img.remove();poster.append(img);}
+    else{const fallback=document.createElement("span");fallback.className="poster-art";fallback.textContent="RAIF";poster.append(fallback);}
+    const title=document.createElement("div");title.className="media-title";title.textContent=item.title;
+    const genres=document.createElement("div");genres.className="media-meta";genres.textContent=getItemGenres(item).slice(0,2).map(genreDisplayName).join(" · ");
+    card.append(poster,title,genres);card.addEventListener("click",()=>openAddonMeta(item.addon,item.catalogEntry,item.meta,item.providers));
+    card.addEventListener("keydown",event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();card.click();}});
+    host.append(card);
+  });
+}
+
 function render() {
   renderContinueWatching();
+  renderRecommendations();
   const q=normalizeTitle(search.value);
   let filtered=addonCatalogItems.filter(item=>(activeFilter==="all"||item.type===activeFilter)&&(!q||normalizeTitle([item.title,item.genre,item.year].join(" ")).includes(q)));
   if(activeView==="library")filtered=filtered.filter(item=>savedIds.includes(item.identity));
