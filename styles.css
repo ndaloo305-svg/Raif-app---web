@@ -179,3 +179,9 @@
 .episode-watch-toggle.is-watched{border-color:#8b714d;background:#30291f;color:#e4c18b}
 .episode-watch-toggle:disabled{opacity:.55;cursor:wait}
 @media(max-width:520px){.episode-row{align-items:stretch;flex-direction:column;gap:4px}.episode-watch-toggle{align-self:flex-start}}
+
+
+.legal-availability{margin:18px 0;padding:15px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.legal-availability h3{margin:0 0 7px;font-size:15px;color:var(--text)}
+.legal-availability p{margin:0 0 12px;color:var(--muted);font-size:12px;line-height:1.8}
+.legal-availability-link{display:inline-flex;align-items:center;text-decoration:none}
