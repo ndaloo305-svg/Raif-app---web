@@ -158,3 +158,9 @@
 .continue-details small{color:var(--muted);font-size:11px}
 .continue-details .save-btn{justify-self:start;margin:3px 0 0;padding:7px 11px}
 @media(max-width:700px){.continue-watching-list{grid-template-columns:1fr}.continue-watching-section{padding:14px}}
+
+/* Taste-based recommendations: genre overlap from the user's own library */
+.recommendations-section{margin:0 0 34px}
+.recommendations-section[hidden]{display:none}
+.recommendations-note{margin:5px 0 0;color:var(--muted);font-size:12px}
+.recommendations-grid{margin-top:15px}
