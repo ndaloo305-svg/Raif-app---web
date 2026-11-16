@@ -24,7 +24,7 @@ python3 -m http.server 8000
 
 ## إعداد تسجيل الدخول
 
-في Supabase Dashboard للمشروع `wdgjjqwxsluumltezqlp`:
+في Supabase Dashboard لمشروع RAIF Web الحالي `puhipyjljmbvczijtzkb`:
 1. افتح Authentication ثم URL Configuration.
 2. أضف رابط الموقع المنشور إلى قائمة Redirect URLs، وأضف رابط التطوير المحلي عند الحاجة.
 3. تأكد من إعداد Site URL وقالب البريد الإلكتروني لإرسال رابط الدخول.
@@ -32,10 +32,10 @@ python3 -m http.server 8000
 المفتاح الموجود في الواجهة هو Publishable Key فقط، وهو مخصص للاستخدام من المتصفح مع RLS.
 
 ## حدود النسخة الحالية
-- بطاقات الصفحة الرئيسية الحالية ما زالت بيانات تجريبية؛ كتالوجات الإضافات تُستعرض حالياً من قسم «مصادري» بعد تسجيل الدخول.
+- الصفحة الرئيسية والكتالوج يعتمدان على كتالوجات المصادر المفعّلة؛ لا تُعرض عناوين تجريبية على أنها محتوى حقيقي.
 - استيراد JSON يفحص Manifest عبر Edge Function خاصة بالمشروع، ويستبعد إضافات Torrent وDebrid المعروفة، ويحفظ موارد الكتالوجات والترجمات. طلبات Manifest والكتالوجات والتفاصيل والتدفقات والترجمات تمر عبر وسيط موثّق يتحقق من ملكية المصدر وفق RLS، ولا تحتاج خوادم الإضافات إلى CORS لهذه الطلبات.
 - تمت إضافة البحث عن الترجمات من تفاصيل العنوان لمصادر Subtito وSubSource وSubDL وSubMaker وOpenSubtitles، مع تحميل ملفات الترجمة عبر الوسيط وتحويل SRT إلى WebVTT.
-- مشغل RAIF يقبل روابط HTTPS المباشرة الجاهزة للمتصفح، ويدعم HLS وDASH برمجياً حسب المتصفح والخادم. قد تتطلب HLS وDASH ترويسات CORS من خادم الوسائط نفسه. يتم إخفاء روابط Torrent والروابط الخارجية والروابط التي تعلن أنها غير جاهزة للويب. لا يوجد دعم DRM أو الروابط التي تتطلب ترويسات مخصصة أو تشغيل Torrent.
+- مشغل RAIF يقبل روابط HTTPS المباشرة الجاهزة للمتصفح، ويدعم HLS وDASH برمجياً حسب المتصفح والخادم. قد تتطلب HLS وDASH ترويسات CORS من خادم الوسائط نفسه. يتم إخفاء روابط Torrent والروابط التي تعلن أنها غير جاهزة للويب. لا يوجد دعم DRM أو الروابط التي تتطلب ترويسات مخصصة أو تشغيل Torrent. لا تُضاف روابط بث إلا من مزود يملك حق التوزيع أو تفويضاً واضحاً.
 - المزامنة الحالية تشمل المفضلة وروابط الإضافات؛ قائمة المشاهدة ومصادر الإضافات متزامنة عبر Supabase. سجل مشاهدة الأفلام والحلقات وتقدم المسلسلات يُحفظ في `public.watch_history` مع RLS ومزامنة بين الأجهزة، ويستخدم تخزيناً محلياً احتياطياً عند انقطاع الاتصال.
 - أُضيف سير عمل GitHub Pages للنشر التلقائي. يلزم تفعيل GitHub Pages من Settings → Pages واختيار GitHub Actions كمصدر أول مرة.
 
@@ -44,9 +44,15 @@ python3 -m http.server 8000
 
 ## Stremio catalog browsing
 
-The source manager reads enabled add-on HTTPS Manifests, lists declared catalogs, supports their extra parameters, displays metadata details, and lists stream options returned by the add-on. Direct video and HLS stream URLs can be played in RAIF’s in-page player when supported by the browser and source server.
+The source manager reads enabled add-on HTTPS Manifests through the authenticated RAIF proxy, lists declared catalogs, supports their extra parameters, displays metadata details, and lists stream options returned by the add-on. Direct video, HLS and DASH stream URLs can be played in RAIF’s in-page player when supported by the browser and source server.
 
-- Catalog requests are made directly from the browser; the add-on server must allow cross-origin requests (CORS).
-- Only HTTPS Manifest and poster URLs are accepted.
-- Responses are limited to 1.5 MB and requests time out after 12 seconds.
-- Catalog browsing supports required and optional extra parameters declared by the add-on. Direct HTTP(S) video and HLS playback are implemented. Torrent, DASH, DRM, and sources requiring custom headers are not supported yet.
+- Only HTTPS Manifest, poster and stream URLs are accepted for embedded playback.
+- Requests are routed through the RAIF Supabase Edge Function proxy; the source server does not need to expose browser CORS to the client for proxied metadata requests.
+- Catalog browsing supports required and optional extra parameters declared by the add-on.
+- Title details now include a JustWatch Saudi Arabia search link to find licensed subscription, rental, purchase and free-with-ads availability. This is a discovery link, not an embedded stream or a guarantee that a provider carries the title.
+- Direct playback is possible only when a source returns a browser-compatible authorized URL. DRM, torrent and sources requiring custom headers are not supported.
+
+
+## Legal streaming discovery
+
+RAIF separates metadata/catalog sources from playback providers. It does not scrape, proxy or publish unauthorized stream URLs. JustWatch is linked as a legal availability guide for Saudi Arabia; TMDB's Watch Providers API can be added when a TMDB API credential and the required JustWatch attribution are configured. TMDB's provider data indicates where titles are available but does not itself provide direct playback URLs.
