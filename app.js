@@ -948,20 +948,6 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta, providers = [{add
     sourceInfo.textContent = "المصادر التي وفّرت هذا العنوان: " + [...new Set(providers.map(source => source.addon.name || source.addon.addon_id))].join("، ");
     content.append(sourceInfo);
 
-    const availabilitySection=document.createElement("section");
-    availabilitySection.className="legal-availability";
-    const availabilityHeading=document.createElement("h3");
-    availabilityHeading.textContent="أين يمكن مشاهدة هذا العمل؟";
-    const availabilityNote=document.createElement("p");
-    availabilityNote.textContent="ابحث عن خيارات المشاهدة القانونية المتاحة في السعودية، بما فيها الاشتراك أو التأجير أو الشراء أو المشاهدة المجانية.";
-    const availabilityLink=document.createElement("a");
-    availabilityLink.href="https://www.justwatch.com/sa/search?q="+encodeURIComponent(meta.name||catalogMeta.name||catalogMeta.id||"");
-    availabilityLink.target="_blank";
-    availabilityLink.rel="noopener noreferrer";
-    availabilityLink.className="save-btn legal-availability-link";
-    availabilityLink.textContent="اعرض منصات المشاهدة في السعودية ↗";
-    availabilitySection.append(availabilityHeading,availabilityNote,availabilityLink);
-    content.append(availabilitySection);
 
     if (typeof meta.poster === "string" && safeHttpsUrl(meta.poster)) {
       const poster = document.createElement("img");
