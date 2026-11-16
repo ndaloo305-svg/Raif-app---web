@@ -520,7 +520,7 @@ async function loadSources() {
     remove.textContent = "حذف";
     remove.addEventListener("click", () => deleteSource(addon.id));
     actions.append(check,browse, toggle, remove);
-    card.append(identity, actions);
+    card.append(actions);
     list.append(card);
   });
 }
