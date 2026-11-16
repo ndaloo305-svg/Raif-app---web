@@ -164,3 +164,18 @@
 .recommendations-section[hidden]{display:none}
 .recommendations-note{margin:5px 0 0;color:var(--muted);font-size:12px}
 .recommendations-grid{margin-top:15px}
+
+
+/* Season-grouped episode tracking */
+.episode-season-list{display:grid;gap:9px;margin:12px 0}
+.episode-season{border:1px solid var(--line);border-radius:11px;background:#15171d;overflow:hidden}
+.episode-season>summary{padding:13px 15px;color:#e4c18b;font-size:13px;font-weight:700;cursor:pointer;list-style-position:inside}
+.episode-season[open]>summary{border-bottom:1px solid var(--line)}
+.episode-row{display:flex;align-items:center;gap:9px;padding:9px 11px;border-bottom:1px solid #292c3455}
+.episode-row:last-child{border-bottom:0}
+.episode-choice{flex:1;min-width:0;text-align:right;border:0;border-radius:8px;background:transparent;color:#e8e8ed;padding:9px;font:12px/1.6 "IBM Plex Sans Arabic",system-ui,sans-serif;cursor:pointer}
+.episode-choice[aria-pressed="true"]{background:#30291f;color:#f1d5a5}
+.episode-watch-toggle{flex:0 0 auto;border:1px solid #4b5e50;border-radius:8px;background:#1d2922;color:#c2e4ce;padding:8px 10px;font:11px "IBM Plex Sans Arabic",system-ui,sans-serif;cursor:pointer}
+.episode-watch-toggle.is-watched{border-color:#8b714d;background:#30291f;color:#e4c18b}
+.episode-watch-toggle:disabled{opacity:.55;cursor:wait}
+@media(max-width:520px){.episode-row{align-items:stretch;flex-direction:column;gap:4px}.episode-watch-toggle{align-self:flex-start}}
