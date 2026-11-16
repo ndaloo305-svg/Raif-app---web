@@ -183,7 +183,39 @@ function renderGenreFilters(items) {
   host.hidden = known.size === 0;
 }
 
+function renderContinueWatching(){
+  const section=document.querySelector("#continue-watching");
+  const host=document.querySelector("#continue-watching-list");
+  if(!section||!host)return;
+  host.replaceChildren();
+  const latestByIdentity=new Map();
+  watchedRecords.filter(record=>record.episodeId).forEach(record=>{
+    const previous=latestByIdentity.get(record.identity);
+    if(!previous||Date.parse(record.watchedAt||0)>Date.parse(previous.watchedAt||0))latestByIdentity.set(record.identity,record);
+  });
+  const entries=[...latestByIdentity.values()].map(record=>({
+    record,
+    item:addonCatalogItems.find(item=>item.identity===record.identity)
+  })).filter(entry=>entry.item).sort((a,b)=>Date.parse(b.record.watchedAt||0)-Date.parse(a.record.watchedAt||0)).slice(0,8);
+  section.hidden=activeView!=="home"||entries.length===0;
+  entries.forEach(({record,item})=>{
+    const card=document.createElement("article");card.className="continue-card";
+    const poster=document.createElement("div");poster.className="continue-poster";
+    const url=safeAddonAssetUrl(item.poster,item.addon.manifest_url);
+    if(url){const img=document.createElement("img");img.src=url.href;img.alt="";img.loading="lazy";img.referrerPolicy="no-referrer";img.onerror=()=>img.remove();poster.append(img);}
+    else{const fallback=document.createElement("span");fallback.textContent="RAIF";poster.append(fallback);}
+    const details=document.createElement("div");details.className="continue-details";
+    const title=document.createElement("strong");title.textContent=item.title;
+    const episode=document.createElement("span");episode.textContent=[record.season!=null?"الموسم "+record.season:"",record.episode!=null?"الحلقة "+record.episode:"",record.episodeTitle].filter(Boolean).join(" · ")||"آخر حلقة سجلتها";
+    const count=document.createElement("small");count.textContent=getEpisodeWatchCount(item.identity).toLocaleString("ar")+" حلقة مسجلة";
+    const action=document.createElement("button");action.type="button";action.className="save-btn";action.textContent="متابعة المسلسل";
+    action.addEventListener("click",()=>openAddonMeta(item.addon,item.catalogEntry,item.meta,item.providers));
+    details.append(title,episode,count,action);card.append(poster,details);host.append(card);
+  });
+}
+ 
 function render() {
+  renderContinueWatching();
   const q=normalizeTitle(search.value);
   let filtered=addonCatalogItems.filter(item=>(activeFilter==="all"||item.type===activeFilter)&&(!q||normalizeTitle([item.title,item.genre,item.year].join(" ")).includes(q)));
   if(activeView==="library")filtered=filtered.filter(item=>savedIds.includes(item.identity));
