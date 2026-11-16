@@ -960,7 +960,7 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta, providers = [{add
           const toggle=document.createElement("button");toggle.type="button";toggle.className="episode-watch-toggle";
           const updateToggle=()=>{const watched=isEpisodeWatched(trackedItem.identity,video.id);toggle.textContent=watched?"✓ شاهدتها — إلغاء":"تسجيل المشاهدة";toggle.classList.toggle("is-watched",watched);};
           updateToggle();
-          toggle.addEventListener("click",async()=>{toggle.disabled=true;await markEpisodeWatched(trackedItem,video);updateToggle();updateGroupTitle();updateProgressNote();toggle.disabled=false;});
+          toggle.addEventListener("click",async()=>{toggle.disabled=true;await markEpisodeWatched(trackedItem,video);updateToggle();updateGroupTitle();updateProgressNote();updateEpisodeLabel();toggle.disabled=false;});
           row.append(choose,toggle);group.append(row);
         });
         episodeList.append(group);
