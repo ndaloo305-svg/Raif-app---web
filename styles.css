@@ -144,3 +144,17 @@
 .sort-control{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;white-space:nowrap}
 .sort-control select{border:1px solid var(--line);border-radius:8px;background:#17181d;color:#eee;padding:8px 10px;font:12px "IBM Plex Sans Arabic",system-ui,sans-serif}
 @media(max-width:600px){.genre-toolbar{align-items:stretch}.genre-filters{width:100%;flex-wrap:nowrap;overflow-x:auto;padding:2px 0 7px;scrollbar-width:none}.genre-filters::-webkit-scrollbar{display:none}.genre-chip{flex:0 0 auto}.sort-control{justify-content:flex-start}}
+
+/* Continue watching — derived only from recorded episode history */
+.continue-watching-section{margin:0 0 34px;padding:20px;border:1px solid var(--line);border-radius:16px;background:linear-gradient(120deg,#1b1d24,#14151a)}
+.continue-watching-section[hidden]{display:none}
+.continue-watching-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.continue-card{display:flex;align-items:center;gap:13px;min-width:0;padding:10px;border:1px solid var(--line);border-radius:12px;background:#111319}
+.continue-poster{flex:0 0 76px;width:76px;aspect-ratio:2/3;overflow:hidden;border-radius:8px;background:#252832;display:grid;place-items:center;color:var(--accent);font-weight:700}
+.continue-poster img{width:100%;height:100%;object-fit:cover}
+.continue-details{display:grid;gap:6px;min-width:0}
+.continue-details strong{color:#f4f4f6;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.continue-details span{color:#c7c9d1;font-size:12px;line-height:1.6}
+.continue-details small{color:var(--muted);font-size:11px}
+.continue-details .save-btn{justify-self:start;margin:3px 0 0;padding:7px 11px}
+@media(max-width:700px){.continue-watching-list{grid-template-columns:1fr}.continue-watching-section{padding:14px}}
