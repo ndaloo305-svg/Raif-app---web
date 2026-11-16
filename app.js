@@ -32,7 +32,7 @@ function isTitleWatched(item){return watchedRecords.some(x=>x.identity===item.id
 function isEpisodeWatched(identity,id){return watchedRecords.some(x=>x.identity===identity&&x.episodeId===String(id));}
 function getEpisodeWatchCount(identity){return new Set(watchedRecords.filter(x=>x.identity===identity&&x.episodeId).map(x=>x.episodeId)).size;}
 async function toggleTitleWatched(item){if(!currentUser){authDialog.showModal();setStatus(authStatus,"سجّل الدخول لتسجيل المشاهدة.");return;}if(isTitleWatched(item)){watchedRecords=watchedRecords.filter(x=>!(x.identity===item.identity&&!x.episodeId));queueWatchDelete(item.identity,"");}else{const record={identity:item.identity,title:item.title,type:item.type,year:item.year,watchedAt:new Date().toISOString()};watchedRecords.push(record);queueWatchUpsert(record);}saveWatchHistory();render();await flushWatchHistoryQueue();}
-async function markEpisodeWatched(item,episode){if(!currentUser){authDialog.showModal();setStatus(authStatus,"سجّل الدخول لتسجيل تقدم الحلقات.");return;}const id=String(episode?.id||"");if(id&&!isEpisodeWatched(item.identity,id)){const record={identity:item.identity,title:item.title,type:item.type,year:item.year,episodeId:id,episodeTitle:episode.title||"",season:episode.season??null,episode:episode.episode??null,watchedAt:new Date().toISOString()};watchedRecords.push(record);saveWatchHistory();await syncWatchRecord(record);render();}}
+async function markEpisodeWatched(item,episode){if(!currentUser){authDialog.showModal();setStatus(authStatus,"سجّل الدخول لتسجيل تقدم الحلقات.");return;}const id=String(episode?.id||"");if(!id)return;const existing=watchedRecords.find(record=>record.identity===item.identity&&record.episodeId===id);if(existing){watchedRecords=watchedRecords.filter(record=>!(record.identity===item.identity&&record.episodeId===id));queueWatchDelete(item.identity,id);saveWatchHistory();await flushWatchHistoryQueue();render();return;}const record={identity:item.identity,title:item.title,type:item.type,year:item.year,episodeId:id,episodeTitle:episode.title||"",season:episode.season??null,episode:episode.episode??null,watchedAt:new Date().toISOString()};watchedRecords.push(record);saveWatchHistory();await syncWatchRecord(record);render();}
 let addons = [];
 let addonCatalogItems = [];
 let addonCatalogLoading = false;
@@ -928,34 +928,48 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta, providers = [{add
 
     let selectedVideoId = null;
     if (catalogEntry.type === "series" && Array.isArray(meta.videos) && meta.videos.length) {
-      selectedVideoId = meta.videos[0]?.id || null;
+      const episodes=meta.videos.filter(video=>video&&video.id);
+      selectedVideoId = episodes[0]?.id || null;
       const episodeLabel = document.createElement("label");
       episodeLabel.className = "episode-select-label";
-      episodeLabel.textContent = "اختر الموسم والحلقة";
-      const episodeSelect = document.createElement("select");
-      episodeSelect.className = "episode-select";
-      meta.videos.forEach((video, index) => {
-        if (!video?.id) return;
-        const option = document.createElement("option");
-        option.value = video.id;
-        option.textContent = [
-          video.season != null ? "الموسم " + video.season : "",
-          video.episode != null ? "الحلقة " + video.episode : "",
-          video.title || ("حلقة " + (index + 1))
-        ].filter(Boolean).join(" · ");
-        episodeSelect.append(option);
+      episodeLabel.textContent = "الحلقات حسب الموسم";
+      const episodeGroups = new Map();
+      episodes.forEach((video,index)=>{
+        const seasonKey=video.season==null?"unknown":String(video.season);
+        if(!episodeGroups.has(seasonKey))episodeGroups.set(seasonKey,[]);
+        episodeGroups.get(seasonKey).push({video,index});
       });
-      episodeSelect.value=selectedVideoId||"";
-      const episodeTrackButton=document.createElement("button");episodeTrackButton.type="button";episodeTrackButton.className="save-btn";
-      const selectedEpisode=()=>meta.videos.find(video=>String(video.id)===String(selectedVideoId));
-      const updateEpisodeLabel=()=>{const ep=selectedEpisode();episodeTrackButton.textContent=ep&&isEpisodeWatched(trackedItem.identity,ep.id)?"✓ الحلقة مسجلة كمشاهدة":"تسجيل مشاهدة هذه الحلقة";};
-      updateEpisodeLabel();
-      episodeSelect.addEventListener("change",()=>{selectedVideoId=episodeSelect.value||null;streamsArea.replaceChildren();streamsButton.textContent="عرض مصادر تشغيل الحلقة";updateEpisodeLabel();});
-      episodeTrackButton.addEventListener("click",()=>{const ep=selectedEpisode();if(ep){markEpisodeWatched(trackedItem,ep);updateEpisodeLabel();}});
+      const episodeList=document.createElement("div");
+      episodeList.className="episode-season-list";
+      const selectedEpisode=()=>episodes.find(video=>String(video.id)===String(selectedVideoId));
       const progressNote=document.createElement("p");progressNote.className="detail-note";
-      const updateProgressNote=()=>{progressNote.textContent="تقدمك: "+getEpisodeWatchCount(trackedItem.identity).toLocaleString("ar")+" من "+meta.videos.length.toLocaleString("ar")+" حلقة مسجلة كمشاهدة.";};
-      updateProgressNote();episodeTrackButton.addEventListener("click",updateProgressNote);
-      content.append(episodeLabel,episodeSelect,episodeTrackButton,progressNote);
+      const updateProgressNote=()=>{progressNote.textContent="تقدمك: "+getEpisodeWatchCount(trackedItem.identity).toLocaleString("ar")+" من "+episodes.length.toLocaleString("ar")+" حلقة مسجلة كمشاهدة.";};
+      [...episodeGroups.entries()].sort((a,b)=>a[0]==="unknown"?1:b[0]==="unknown"?-1:Number(a[0])-Number(b[0])).forEach(([season,entries])=>{
+        const group=document.createElement("details");group.className="episode-season";
+        const groupTitle=document.createElement("summary");
+        const seasonNumber=season==="unknown"?null:Number(season);
+        const watchedInSeason=()=>entries.filter(({video})=>isEpisodeWatched(trackedItem.identity,video.id)).length;
+        const updateGroupTitle=()=>{groupTitle.textContent=(seasonNumber==null?"حلقات إضافية":"الموسم "+seasonNumber)+" · "+watchedInSeason().toLocaleString("ar")+"/"+entries.length.toLocaleString("ar")+" مشاهدة";};
+        updateGroupTitle();group.append(groupTitle);
+        entries.forEach(({video,index})=>{
+          const row=document.createElement("div");row.className="episode-row";
+          const choose=document.createElement("button");choose.type="button";choose.className="episode-choice";
+          choose.textContent=[video.episode!=null?"الحلقة "+video.episode:"الحلقة "+(index+1),video.title||"بدون عنوان"].join(" · ");
+          choose.setAttribute("aria-pressed",String(String(video.id)===String(selectedVideoId)));
+          choose.addEventListener("click",()=>{selectedVideoId=String(video.id);episodeList.querySelectorAll(".episode-choice").forEach(button=>button.setAttribute("aria-pressed","false"));choose.setAttribute("aria-pressed","true");streamsArea.replaceChildren();streamsButton.textContent="عرض مصادر تشغيل الحلقة";});
+          const toggle=document.createElement("button");toggle.type="button";toggle.className="episode-watch-toggle";
+          const updateToggle=()=>{const watched=isEpisodeWatched(trackedItem.identity,video.id);toggle.textContent=watched?"✓ شاهدتها — إلغاء":"تسجيل المشاهدة";toggle.classList.toggle("is-watched",watched);};
+          updateToggle();
+          toggle.addEventListener("click",async()=>{toggle.disabled=true;await markEpisodeWatched(trackedItem,video);updateToggle();updateGroupTitle();updateProgressNote();toggle.disabled=false;});
+          row.append(choose,toggle);group.append(row);
+        });
+        episodeList.append(group);
+      });
+      const episodeTrackButton=document.createElement("button");episodeTrackButton.type="button";episodeTrackButton.className="save-btn";
+      const updateEpisodeLabel=()=>{const ep=selectedEpisode();episodeTrackButton.textContent=ep&&isEpisodeWatched(trackedItem.identity,ep.id)?"✓ الحلقة المحددة مسجلة — إلغاء":"تسجيل مشاهدة الحلقة المحددة";};
+      updateEpisodeLabel();
+      episodeTrackButton.addEventListener("click",async()=>{const ep=selectedEpisode();if(ep){episodeTrackButton.disabled=true;await markEpisodeWatched(trackedItem,ep);updateEpisodeLabel();updateProgressNote();episodeTrackButton.disabled=false;}});
+      content.append(episodeLabel,episodeList,episodeTrackButton,progressNote);
     }
 
     const subtitleButton = document.createElement("button");
