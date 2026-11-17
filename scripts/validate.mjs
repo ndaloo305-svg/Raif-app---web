@@ -50,4 +50,8 @@ if (!js.includes("CATALOG_PAGE_SIZE = 100") || !js.includes("catalogPages")) {
   throw new Error("On-demand catalog pagination state is missing.");
 }
 
+if (!js.includes("/anime|أنمي/i.test(catalogHint)")) {
+  throw new Error("Series-declared anime catalogs must be routed to the anime section.");
+}
+
 console.log("RAIF Web structural, cache, pagination and source regression checks passed.");
