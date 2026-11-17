@@ -618,8 +618,12 @@ function fetchAddonManifestByUrl(manifestUrl) {
 }
 
 async function loadAddonDiscovery(view = activeView) {
-  if (!currentUser || view === "library" || view === "sources") return;
+  if (!currentUser) return;
   const run = ++addonDiscoveryRun;
+  if (view === "library" || view === "sources") {
+    addonCatalogLoading = false;
+    return;
+  }
   const wanted = view === "movies" ? ["movie"] : view === "series" ? ["series"] : view === "anime" ? ["anime","series"] : ["movie","series","anime"];
   const enabled = addons.filter(addon => addon.enabled);
   addonCatalogLoading = true;
@@ -1709,6 +1713,8 @@ document.querySelectorAll(".nav-item").forEach(button => button.addEventListener
     render();
     if (["home","movies","series","anime"].includes(activeView)) loadAddonDiscovery(activeView);
   } else {
+    addonDiscoveryRun++;
+    addonCatalogLoading = false;
     loadSources();
   }
   (isSources ? document.querySelector("#source-manager") : document.querySelector("#catalog"))
