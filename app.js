@@ -37,7 +37,10 @@ let addons = [];
 let addonCatalogItems = [];
 let addonCatalogIndex = new Map();
 let catalogDisplayLimit = 72;
+let catalogMoreLoading = false;
 let addonCatalogLoading = false;
+const addonCatalogPages = new Map();
+const CATALOG_PAGE_SIZE = 100;
 const addonDiscoveryCache = new Set();
 const addonManifestCache = new Map();
 const addonDiscoveryErrors = [];
@@ -54,6 +57,7 @@ const typeNames = {movie:"فيلم",series:"مسلسل",anime:"أنمي"};
 
 const CATALOG_CACHE_VERSION = 2;
 const CATALOG_CACHE_TTL = 6 * 60 * 60 * 1000;
+const CATALOG_VISIBLE_BATCH = 72;
 const CATALOG_PAGE_SIZE = 72;
 function catalogCacheKey() {
   return currentUser ? "raif-catalog-cache-v" + CATALOG_CACHE_VERSION + ":" + currentUser.id : null;
@@ -66,7 +70,8 @@ function saveCatalogCache() {
     const entries = addonCatalogItems.flatMap(item => item.providers
       .filter(provider => enabledIds.has(provider.addon.id))
       .map(provider => ({addonId:provider.addon.id,catalogEntry:provider.catalogEntry,meta:provider.meta})));
-    localStorage.setItem(key, JSON.stringify({version:CATALOG_CACHE_VERSION,savedAt:Date.now(),entries}));
+    const catalogPages = [...addonCatalogPages.values()].map(page => ({addonId:page.addon.id,entry:page.entry,nextSkip:page.nextSkip,hasMore:page.hasMore}));
+    localStorage.setItem(key, JSON.stringify({version:CATALOG_CACHE_VERSION,savedAt:Date.now(),entries,catalogPages}));
   } catch (error) {
     console.warn("RAIF catalog cache could not be saved:", error);
   }
@@ -79,6 +84,12 @@ function restoreCatalogCache() {
     if (cached?.version !== CATALOG_CACHE_VERSION || !Array.isArray(cached.entries)) { render(); return; }
     const enabled = new Map(addons.filter(addon => addon.enabled).map(addon => [addon.id,addon]));
     const fresh = Number.isFinite(cached.savedAt) && Date.now() - cached.savedAt < CATALOG_CACHE_TTL;
+    if (Array.isArray(cached.catalogPages)) cached.catalogPages.forEach(page => {
+      const addon = enabled.get(page.addonId);
+      if (addon && page.entry?.id && page.entry?.type && Number.isFinite(page.nextSkip)) {
+        addonCatalogPages.set(addon.id + "|" + page.entry.type + "|" + page.entry.id,{addon,entry:page.entry,nextSkip:page.nextSkip,hasMore:page.hasMore===true,loading:false});
+      }
+    });
     cached.entries.forEach(entry => {
       const addon = enabled.get(entry.addonId);
       if (addon && entry.catalogEntry && entry.meta) {
@@ -298,8 +309,11 @@ function render() {
   catalog.replaceChildren(catalogFragment);
   const loadMore = document.querySelector("#catalog-load-more");
   if (loadMore) {
-    loadMore.hidden = totalFiltered <= visibleItems.length;
-    loadMore.textContent = "عرض المزيد · " + (totalFiltered-visibleItems.length).toLocaleString("ar") + " متبقي";
+    const wantedTypes = activeView === "movies" ? ["movie"] : activeView === "series" ? ["series"] : activeView === "anime" ? ["anime","series"] : ["movie","series","anime"];
+    const hasMorePages = [...addonCatalogPages.values()].some(page => page.hasMore && wantedTypes.includes(page.entry.type));
+    loadMore.hidden = totalFiltered <= visibleItems.length && !hasMorePages;
+    loadMore.textContent = totalFiltered > visibleItems.length ? "عرض المزيد · " + (totalFiltered-visibleItems.length).toLocaleString("ar") + " متبقي" : (catalogMoreLoading ? "جارٍ تحميل عناوين إضافية..." : "تحميل المزيد من الكتالوجات");
+    loadMore.disabled = catalogMoreLoading;
   }
   const count=document.querySelector("#catalog-count");if(count)count.textContent=totalFiltered.toLocaleString("ar")+" عنوان · "+filtered.reduce((n,x)=>n+x.providers.length,0).toLocaleString("ar")+" نتائج مصادر";
   const messages={library:currentUser?"قائمتك فارغة حالياً. أضف العناوين من صفحة التفاصيل.":"سجّل الدخول لعرض قائمتك.",watched:currentUser?"لم تسجّل أي عنوان كمشاهد حتى الآن.":"سجّل الدخول لعرض سجل المشاهدة.",progress:currentUser?"لا يوجد تقدم مسجل للحلقات حتى الآن.":"سجّل الدخول لمتابعة تقدم المسلسلات."};
@@ -673,6 +687,7 @@ async function loadAddonDiscovery(view = activeView) {
         if (run !== addonDiscoveryRun) return;
         if (!Array.isArray(data?.metas)) throw new Error("استجابة الكتالوج لا تحتوي قائمة عناوين صالحة.");
         data.metas.forEach(meta => mergeCatalogMeta(job.addon,job.entry,meta));
+        addonCatalogPages.set(job.key,{addon:job.addon,entry:job.entry,nextSkip:data.metas.length,hasMore:data.metas.length>=CATALOG_PAGE_SIZE,loading:false});
         addonDiscoveryCache.add(job.key);
         scheduleRender();
       } catch(error) {
@@ -690,6 +705,38 @@ async function loadAddonDiscovery(view = activeView) {
     renderDiscoveryDiagnostics();
   }
 }
+async function loadMoreCatalogPages() {
+  const wantedTypes = activeView === "movies" ? ["movie"] : activeView === "series" ? ["series"] : activeView === "anime" ? ["anime","series"] : ["movie","series","anime"];
+  const pages = [...addonCatalogPages.values()].filter(page => page.hasMore && !page.loading && wantedTypes.includes(page.entry.type));
+  if (!pages.length) return;
+  catalogMoreLoading = true;
+  render();
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < pages.length) {
+      const page = pages[cursor++];
+      page.loading = true;
+      try {
+        const data = await Promise.race([
+          fetchAddonResource(page.addon,"catalog",page.entry.type,page.entry.id,{skip:page.nextSkip}),
+          new Promise((_,reject) => setTimeout(() => reject(new Error("انتهت مهلة تحميل الصفحة التالية")),12000))
+        ]);
+        if (!Array.isArray(data?.metas)) throw new Error("استجابة الصفحة التالية غير صالحة.");
+        data.metas.forEach(meta => mergeCatalogMeta(page.addon,page.entry,meta));
+        page.nextSkip += data.metas.length;
+        page.hasMore = data.metas.length >= CATALOG_PAGE_SIZE;
+      } catch(error) {
+        addonDiscoveryErrors.push({addon:page.addon.name || page.addon.addon_id,catalog:page.entry.name || page.entry.id,message:error.message});
+      } finally { page.loading = false; }
+    }
+  };
+  await Promise.all(Array.from({length:Math.min(4,pages.length)},() => worker()));
+  catalogMoreLoading = false;
+  catalogDisplayLimit += CATALOG_VISIBLE_BATCH;
+  saveCatalogCache();
+  render();
+}
+
 function renderDiscoveryDiagnostics() {
   const panel=document.querySelector("#catalog-diagnostics"); if (!panel) return; panel.replaceChildren();
   const heading=document.createElement("strong"); heading.textContent="حالة الكتالوج والمصادر";
@@ -1444,7 +1491,7 @@ async function updateSource(id, changes) {
   }
   setStatus(sourceStatus, "تم تحديث حالة المصدر.");
   await loadSources();
-  addonDiscoveryCache.clear(); addonManifestCache.clear();
+  addonDiscoveryCache.clear(); addonManifestCache.clear(); addonCatalogPages.clear();
   addonCatalogItems = []; addonCatalogIndex.clear();
   restoreCatalogCache();
   if (activeView !== "sources" && activeView !== "library") loadAddonDiscovery(activeView);
@@ -1458,7 +1505,7 @@ async function deleteSource(id) {
   }
   setStatus(sourceStatus, "تم حذف المصدر من حسابك.");
   await loadSources();
-  addonDiscoveryCache.clear(); addonManifestCache.clear(); addonCatalogItems = []; addonCatalogIndex.clear();
+  addonDiscoveryCache.clear(); addonManifestCache.clear(); addonCatalogPages.clear(); addonCatalogItems = []; addonCatalogIndex.clear();
   restoreCatalogCache();
   if (activeView !== "sources" && activeView !== "library") loadAddonDiscovery(activeView);
 }
@@ -1613,9 +1660,9 @@ document.querySelector("#catalog-sort")?.addEventListener("change", event => {
   catalogDisplayLimit = CATALOG_PAGE_SIZE;
   render();
 });
-document.querySelector("#catalog-load-more")?.addEventListener("click", () => {
-  catalogDisplayLimit += CATALOG_PAGE_SIZE;
-  render();
+document.querySelector("#catalog-load-more")?.addEventListener("click", async () => {
+  if (catalogDisplayLimit < addonCatalogItems.length) { catalogDisplayLimit += CATALOG_VISIBLE_BATCH; render(); return; }
+  await loadMoreCatalogPages();
 });
 
 let searchRenderTimer = null;
@@ -1625,7 +1672,7 @@ search.addEventListener("input", () => {
   searchRenderTimer = setTimeout(() => { searchRenderTimer = null; render(); }, 160);
 });
 document.querySelector("#refresh-catalog")?.addEventListener("click", () => {
-  addonDiscoveryCache.clear(); addonManifestCache.clear(); addonDiscoveryErrors.length = 0;
+  addonDiscoveryCache.clear(); addonManifestCache.clear(); addonCatalogPages.clear(); addonDiscoveryErrors.length = 0;
   loadAddonDiscovery(activeView);
 });
 document.querySelector("#close-dialog").addEventListener("click", () => document.querySelector("#detail-dialog").close());
