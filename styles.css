@@ -211,3 +211,6 @@
 .player-fallback-button[hidden]{display:none}
 .manual-playback-actions{flex-wrap:wrap}
 .manual-playback-actions .save-btn:disabled{opacity:.55;cursor:default}
+
+.catalog-load-more{display:block;min-width:220px;margin:26px auto 12px;padding:12px 22px;border:1px solid #8b714d;border-radius:11px;background:#26231f;color:#e4c18b;font:600 13px "IBM Plex Sans Arabic",system-ui,sans-serif;cursor:pointer;transition:background .18s ease,border-color .18s ease}.catalog-load-more:hover:not(:disabled){background:#383024;border-color:#c5a36a}.catalog-load-more:disabled{opacity:.65;cursor:wait}.catalog-load-more[hidden]{display:none}
+@media(max-width:760px){.catalog-load-more{width:100%;margin:20px auto 8px;padding:13px}}
