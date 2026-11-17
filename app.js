@@ -669,7 +669,6 @@ async function loadAddonDiscovery(view = activeView) {
     entries.forEach(entry => {
       const key = addon.id + "|" + entry.type + "|" + entry.id;
       if (addonDiscoveryCache.has(key)) return;
-      addonDiscoveryCache.add(key);
       jobs.push({addon,entry,key});
     });
   });
