@@ -63,4 +63,4 @@ RAIF does not include a streaming-platform discovery directory. The project owne
 - `public.playback_sources` stores multiple HTTPS playback servers for a movie or an exact episode, keyed by the stable catalog identity and episode ID.
 - Each row stores server name, URL, format hint (auto/HLS/MP4/DASH/WebM), quality, language, and enabled/order metadata. The browser player receives the format hint and reports browser/CORS failures; saving a URL is not a playback guarantee.
 - Row Level Security restricts all read/write operations to the authenticated owner. The browser uses the publishable key only; no service-role key is used.
-- Links are loaded when a title detail is opened and refreshed when the selected episode changes. Users can add, play, and delete links from the detail view.
+- Links are loaded when a title detail is opened and refreshed when the selected episode changes. Users can add, play, prioritize, and delete links from the detail view. If a selected server fails with a media/HLS/DASH error, the player offers the next saved server in priority order; fallback is user-triggered so a slow stream is not silently interrupted.
