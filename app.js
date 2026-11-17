@@ -1691,8 +1691,16 @@ search.addEventListener("input", () => {
   if (searchRenderTimer !== null) clearTimeout(searchRenderTimer);
   searchRenderTimer = setTimeout(() => { searchRenderTimer = null; render(); }, 160);
 });
-document.querySelector("#refresh-catalog")?.addEventListener("click", () => {
-  addonDiscoveryCache.clear(); clearAddonManifestCache(); addonCatalogPages.clear(); addonDiscoveryErrors.length = 0;
+document.querySelector("#refresh-catalog")?.addEventListener("click", async () => {
+  addonDiscoveryRun++;
+  addonCatalogLoading = false;
+  addonCatalogItems = [];
+  addonCatalogIndex.clear();
+  addonCatalogPages.clear();
+  addonDiscoveryCache.clear();
+  clearAddonManifestCache();
+  addonDiscoveryErrors.length = 0;
+  await loadSources();
   loadAddonDiscovery(activeView);
 });
 document.querySelector("#close-dialog").addEventListener("click", () => document.querySelector("#detail-dialog").close());
