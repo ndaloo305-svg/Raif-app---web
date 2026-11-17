@@ -960,6 +960,8 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta, providers = [{add
     }
 
     let selectedVideoId = null;
+    let getSelectedEpisode = () => null;
+    let manualSourceRequest = 0;
     if (catalogEntry.type === "series" && Array.isArray(meta.videos) && meta.videos.length) {
       const episodes=meta.videos.filter(video=>video&&video.id);
       selectedVideoId = episodes[0]?.id || null;
@@ -975,6 +977,7 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta, providers = [{add
       const episodeList=document.createElement("div");
       episodeList.className="episode-season-list";
       const selectedEpisode=()=>episodes.find(video=>String(video.id)===String(selectedVideoId));
+      getSelectedEpisode = selectedEpisode;
       const progressNote=document.createElement("p");progressNote.className="detail-note";
       const updateProgressNote=()=>{progressNote.textContent="تقدمك: "+getEpisodeWatchCount(trackedItem.identity).toLocaleString("ar")+" من "+episodes.length.toLocaleString("ar")+" حلقة مسجلة كمشاهدة.";};
       [...episodeGroups.entries()].sort((a,b)=>a[0]==="unknown"?1:b[0]==="unknown"?-1:Number(a[0])-Number(b[0])).forEach(([season,entries])=>{
@@ -989,7 +992,7 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta, providers = [{add
           const choose=document.createElement("button");choose.type="button";choose.className="episode-choice";
           choose.textContent=[video.episode!=null?"الحلقة "+video.episode:"الحلقة "+(index+1),video.title||"بدون عنوان"].join(" · ");
           choose.setAttribute("aria-pressed",String(String(video.id)===String(selectedVideoId)));
-          choose.addEventListener("click",()=>{selectedVideoId=String(video.id);episodeList.querySelectorAll(".episode-choice").forEach(button=>button.setAttribute("aria-pressed","false"));choose.setAttribute("aria-pressed","true");streamsArea.replaceChildren();streamsButton.textContent="عرض مصادر تشغيل الحلقة";});
+          choose.addEventListener("click",()=>{selectedVideoId=String(video.id);episodeList.querySelectorAll(".episode-choice").forEach(button=>button.setAttribute("aria-pressed","false"));choose.setAttribute("aria-pressed","true");streamsArea.replaceChildren();streamsButton.textContent="عرض مصادر تشغيل الحلقة";void loadManualPlaybackSources();});
           const toggle=document.createElement("button");toggle.type="button";toggle.className="episode-watch-toggle";
           const updateToggle=()=>{const watched=isEpisodeWatched(trackedItem.identity,video.id);toggle.textContent=watched?"✓ شاهدتها — إلغاء":"تسجيل المشاهدة";toggle.classList.toggle("is-watched",watched);};
           updateToggle();
@@ -1004,6 +1007,100 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta, providers = [{add
       episodeTrackButton.addEventListener("click",async()=>{const ep=selectedEpisode();if(ep){episodeTrackButton.disabled=true;await markEpisodeWatched(trackedItem,ep);updateEpisodeLabel();updateProgressNote();episodeTrackButton.disabled=false;}});
       content.append(episodeLabel,episodeList,episodeTrackButton,progressNote);
     }
+
+
+    const manualPlaybackSection=document.createElement("section");
+    manualPlaybackSection.className="manual-playback-section";
+    const manualPlaybackHeading=document.createElement("h3");
+    manualPlaybackHeading.textContent="روابط البث التي أضفتها";
+    const manualPlaybackHint=document.createElement("p");
+    manualPlaybackHint.className="manual-playback-hint";
+    manualPlaybackHint.textContent="أضف سيرفراتك لهذا الفيلم أو للحلقة المحددة. الروابط تحفظ في حساب RAIF وتظهر على أجهزتك الأخرى.";
+    const manualPlaybackForm=document.createElement("form");
+    manualPlaybackForm.className="manual-playback-form";
+    const manualServerInput=document.createElement("input");
+    manualServerInput.type="text";manualServerInput.maxLength=100;manualServerInput.placeholder="اسم السيرفر (مثال: السيرفر الأول)";manualServerInput.required=true;
+    const manualUrlInput=document.createElement("input");
+    manualUrlInput.type="url";manualUrlInput.inputMode="url";manualUrlInput.placeholder="https://example.com/video.m3u8";manualUrlInput.required=true;manualUrlInput.autocomplete="url";
+    const manualFormatSelect=document.createElement("select");
+    [["auto","تلقائي"],["hls","HLS / M3U8"],["mp4","MP4"],["dash","DASH / MPD"],["webm","WebM"]].forEach(([value,label])=>{const option=document.createElement("option");option.value=value;option.textContent=label;manualFormatSelect.append(option);});
+    const manualQualityInput=document.createElement("input");manualQualityInput.type="text";manualQualityInput.maxLength=40;manualQualityInput.placeholder="الجودة (مثال: 1080p)";
+    const manualLanguageInput=document.createElement("input");manualLanguageInput.type="text";manualLanguageInput.maxLength=40;manualLanguageInput.placeholder="اللغة (اختياري)";
+    const manualSaveButton=document.createElement("button");manualSaveButton.type="submit";manualSaveButton.className="primary-btn";manualSaveButton.textContent="＋ حفظ رابط السيرفر";
+    manualPlaybackForm.append(manualServerInput,manualUrlInput,manualFormatSelect,manualQualityInput,manualLanguageInput,manualSaveButton);
+    const manualPlaybackStatus=document.createElement("p");manualPlaybackStatus.className="manual-playback-status";manualPlaybackStatus.setAttribute("role","status");
+    const manualPlaybackList=document.createElement("div");manualPlaybackList.className="manual-playback-list";
+    manualPlaybackSection.append(manualPlaybackHeading,manualPlaybackHint,manualPlaybackForm,manualPlaybackStatus,manualPlaybackList);
+    async function loadManualPlaybackSources(){
+      const request=++manualSourceRequest;
+      manualPlaybackList.replaceChildren();
+      if(!currentUser){manualPlaybackStatus.textContent="سجّل الدخول لعرض روابط البث المحفوظة.";return;}
+      const episode=getSelectedEpisode();
+      const episodeKey=episode?.id?String(episode.id):"";
+      manualPlaybackStatus.textContent="جارٍ تحميل روابط البث...";
+      const {data,error}=await supabase.from("playback_sources")
+        .select("id,server_name,stream_url,stream_format,quality_label,language,episode_key,episode_title,season_number,episode_number,sort_order")
+        .eq("user_id",currentUser.id)
+        .eq("content_identity",trackedItem.identity)
+        .eq("episode_key",episodeKey)
+        .eq("enabled",true)
+        .order("sort_order",{ascending:true})
+        .order("created_at",{ascending:true})
+        .limit(50);
+      if(request!==manualSourceRequest)return;
+      if(error){manualPlaybackStatus.textContent="تعذر تحميل روابط البث: "+error.message;manualPlaybackStatus.classList.add("is-error");return;}
+      manualPlaybackStatus.classList.remove("is-error");
+      manualPlaybackStatus.textContent=data?.length?"عدد السيرفرات المحفوظة: "+data.length.toLocaleString("ar"):"لا توجد روابط محفوظة لهذا "+(episode?"الحلقة.":"الفيلم بعد.");
+      (data||[]).forEach((source,index)=>{
+        const row=document.createElement("article");row.className="manual-playback-row";
+        const details=document.createElement("div");details.className="manual-playback-details";
+        const name=document.createElement("strong");name.textContent=source.server_name||("سيرفر "+(index+1));
+        const metadata=[source.quality_label,source.language,({auto:"تلقائي",hls:"HLS",mp4:"MP4",dash:"DASH",webm:"WebM"})[source.stream_format]||source.stream_format].filter(Boolean);
+        const info=document.createElement("span");info.textContent=metadata.join(" · ")||"مصدر بث";
+        const address=document.createElement("small");address.textContent=source.stream_url;address.dir="ltr";
+        details.append(name,info,address);
+        const actions=document.createElement("div");actions.className="manual-playback-actions";
+        const play=document.createElement("button");play.type="button";play.className="save-btn";play.textContent="تشغيل";
+        play.addEventListener("click",async()=>{
+          const mime=({hls:"application/vnd.apple.mpegurl",mp4:"video/mp4",dash:"application/dash+xml",webm:"video/webm"})[source.stream_format]||"";
+          try{await openStreamPlayer(source.stream_url,trackedItem.title+" · "+source.server_name,{type:mime,filename:source.stream_url});}
+          catch(playError){manualPlaybackStatus.textContent="تعذر بدء التشغيل: "+playError.message;manualPlaybackStatus.classList.add("is-error");}
+        });
+        const remove=document.createElement("button");remove.type="button";remove.className="source-remove";remove.textContent="حذف";
+        remove.addEventListener("click",async()=>{
+          remove.disabled=true;
+          const {error:deleteError}=await supabase.from("playback_sources").delete().eq("id",source.id).eq("user_id",currentUser.id);
+          if(deleteError){manualPlaybackStatus.textContent="تعذر حذف الرابط: "+deleteError.message;manualPlaybackStatus.classList.add("is-error");remove.disabled=false;return;}
+          manualPlaybackStatus.classList.remove("is-error");await loadManualPlaybackSources();
+        });
+        actions.append(play,remove);row.append(details,actions);manualPlaybackList.append(row);
+      });
+    }
+    manualPlaybackForm.addEventListener("submit",async event=>{
+      event.preventDefault();
+      if(!currentUser){authDialog.showModal();setStatus(authStatus,"سجّل الدخول لحفظ روابط البث.");return;}
+      const serverName=manualServerInput.value.trim();
+      const streamUrl=safeHttpsUrl(manualUrlInput.value.trim());
+      if(!serverName||!streamUrl){manualPlaybackStatus.textContent="أدخل اسم السيرفر ورابط HTTPS صحيحاً.";manualPlaybackStatus.classList.add("is-error");return;}
+      const episode=getSelectedEpisode();
+      manualSaveButton.disabled=true;manualPlaybackStatus.classList.remove("is-error");manualPlaybackStatus.textContent="جارٍ حفظ الرابط...";
+      const payload={
+        user_id:currentUser.id,content_identity:trackedItem.identity,content_type:trackedItem.type,
+        content_title:trackedItem.title,content_year:String(trackedItem.year||""),
+        episode_key:episode?.id?String(episode.id):"",episode_title:episode?.title||"",
+        season_number:Number.isInteger(Number(episode?.season))?Number(episode.season):null,
+        episode_number:Number.isInteger(Number(episode?.episode))?Number(episode.episode):null,
+        server_name:serverName,stream_url:streamUrl.href,stream_format:manualFormatSelect.value,
+        quality_label:manualQualityInput.value.trim(),language:manualLanguageInput.value.trim(),enabled:true,sort_order:100
+      };
+      const {error:insertError}=await supabase.from("playback_sources").insert(payload);
+      manualSaveButton.disabled=false;
+      if(insertError){manualPlaybackStatus.textContent="تعذر حفظ الرابط: "+insertError.message;manualPlaybackStatus.classList.add("is-error");return;}
+      manualUrlInput.value="";manualPlaybackStatus.classList.remove("is-error");manualPlaybackStatus.textContent="تم حفظ رابط السيرفر.";
+      await loadManualPlaybackSources();
+    });
+    content.append(manualPlaybackSection);
+    void loadManualPlaybackSources();
 
     const subtitleButton = document.createElement("button");
     subtitleButton.type = "button";
