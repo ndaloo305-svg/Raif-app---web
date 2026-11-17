@@ -668,41 +668,6 @@ async function loadAddonDiscovery(view = activeView) {
     promise,
     new Promise((_,reject) => setTimeout(() => reject(new Error("انتهت مهلة الاتصال: " + label)),ms))
   ]);
-  const manifestResults = new Array(enabled.length);
-  let manifestCursor = 0;
-  const manifestWorker = async () => {
-    while (manifestCursor < enabled.length && run === addonDiscoveryRun) {
-      const index = manifestCursor++;
-      const addon = enabled[index];
-      try {
-        const manifest = await withTimeout(fetchAddonResource(addon,"manifest"),"Manifest " + (addon.name || addon.addon_id));
-        manifestResults[index] = {status:"fulfilled",value:{addon,manifest}};
-      } catch(error) {
-        removeAddonManifestCache(addon);
-        manifestResults[index] = {status:"rejected",reason:Object.assign(new Error(error.message),{addon})};
-      }
-    }
-  };
-  await Promise.all(Array.from({length:Math.min(5,enabled.length)},() => manifestWorker()));
-  if (run !== addonDiscoveryRun) return;
-  const jobs = [];
-  manifestResults.forEach(result => {
-    if (result.status === "rejected") {
-      const addon = result.reason?.addon;
-      addonDiscoveryErrors.push({addon:addon?.name || addon?.addon_id || "مصدر",message:result.reason?.message || "تعذر تحميل Manifest"});
-      return;
-    }
-    const {addon,manifest} = result.value;
-    const resources = Array.isArray(manifest?.resources) ? manifest.resources.map(resource => typeof resource === "string" ? resource : resource?.name) : [];
-    if (!resources.includes("catalog")) return;
-    const entries = (Array.isArray(manifest?.catalogs) ? manifest.catalogs : []).filter(entry => entry?.id && wanted.includes(entry.type));
-    entries.forEach(entry => {
-      const key = addon.id + "|" + entry.type + "|" + entry.id;
-      if (addonDiscoveryCache.has(key)) return;
-      jobs.push({addon,entry,key});
-    });
-  });
-  let cursor = 0;
   let renderTimer = null;
   const scheduleRender = () => {
     if (renderTimer !== null) return;
@@ -711,29 +676,48 @@ async function loadAddonDiscovery(view = activeView) {
       if (run === addonDiscoveryRun) render();
     },350);
   };
+  let sourceCursor = 0;
   const worker = async () => {
-    while (cursor < jobs.length && run === addonDiscoveryRun) {
-      const job = jobs[cursor++];
+    while (sourceCursor < enabled.length && run === addonDiscoveryRun) {
+      const addon = enabled[sourceCursor++];
+      let manifest;
       try {
-        const data = await withTimeout(
-          fetchAddonResource(job.addon,"catalog",job.entry.type,job.entry.id,{skip:0}),
-          "كتالوج " + (job.entry.name || job.entry.id)
-        );
-        if (run !== addonDiscoveryRun) return;
-        if (!Array.isArray(data?.metas)) throw new Error("استجابة الكتالوج لا تحتوي قائمة عناوين صالحة.");
-        data.metas.forEach(meta => mergeCatalogMeta(job.addon,job.entry,meta));
-        addonCatalogPages.set(job.key,{addon:job.addon,entry:job.entry,nextSkip:data.metas.length,hasMore:data.metas.length>=CATALOG_PAGE_SIZE,loading:false});
-        addonDiscoveryCache.add(job.key);
-        scheduleRender();
+        manifest = await withTimeout(fetchAddonResource(addon,"manifest"),"Manifest " + (addon.name || addon.addon_id));
       } catch(error) {
         if (run !== addonDiscoveryRun) return;
-        addonDiscoveryCache.delete(job.key);
-        addonDiscoveryErrors.push({addon:job.addon.name || job.addon.addon_id,catalog:job.entry.name || job.entry.id,message:error.message});
-        console.warn("RAIF catalog load failed:",job.addon.name,job.entry.id,error);
+        removeAddonManifestCache(addon);
+        addonDiscoveryErrors.push({addon:addon.name || addon.addon_id || "مصدر",message:error.message});
+        continue;
+      }
+      if (run !== addonDiscoveryRun) return;
+      const resources = Array.isArray(manifest?.resources) ? manifest.resources.map(resource => typeof resource === "string" ? resource : resource?.name) : [];
+      if (!resources.includes("catalog")) continue;
+      const entries = (Array.isArray(manifest?.catalogs) ? manifest.catalogs : []).filter(entry => entry?.id && wanted.includes(entry.type));
+      for (const entry of entries) {
+        if (run !== addonDiscoveryRun) return;
+        const key = addon.id + "|" + entry.type + "|" + entry.id;
+        if (addonDiscoveryCache.has(key)) continue;
+        try {
+          const data = await withTimeout(
+            fetchAddonResource(addon,"catalog",entry.type,entry.id,{skip:0}),
+            "كتالوج " + (entry.name || entry.id)
+          );
+          if (run !== addonDiscoveryRun) return;
+          if (!Array.isArray(data?.metas)) throw new Error("استجابة الكتالوج لا تحتوي قائمة عناوين صالحة.");
+          data.metas.forEach(meta => mergeCatalogMeta(addon,entry,meta));
+          addonCatalogPages.set(key,{addon,entry,nextSkip:data.metas.length,hasMore:data.metas.length>=CATALOG_PAGE_SIZE,loading:false});
+          addonDiscoveryCache.add(key);
+          scheduleRender();
+        } catch(error) {
+          if (run !== addonDiscoveryRun) return;
+          addonDiscoveryCache.delete(key);
+          addonDiscoveryErrors.push({addon:addon.name || addon.addon_id,catalog:entry.name || entry.id,message:error.message});
+          console.warn("RAIF catalog load failed:",addon.name,entry.id,error);
+        }
       }
     }
   };
-  await Promise.all(Array.from({length:Math.min(6,jobs.length)},() => worker()));
+  await Promise.all(Array.from({length:Math.min(6,enabled.length)},() => worker()));
   if (run === addonDiscoveryRun) {
     saveCatalogCache();
     addonCatalogLoading = false;
