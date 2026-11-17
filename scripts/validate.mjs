@@ -18,4 +18,25 @@ for (const required of ["auth-dialog", "source-manager", "source-form", "source-
 if (!html.includes('type="module"')) throw new Error("app.js must load as an ES module");
 if (/service_role|sb_secret_/i.test(js)) throw new Error("A server-side Supabase key must never be shipped to the browser");
 
-console.log("RAIF Web structural checks passed.");
+
+for (const required of [
+  "addonCatalogIndex.get(identity)",
+  "addonDiscoveryCache.add(job.key)",
+  "loadMoreCatalogPages()",
+  "CATALOG_CACHE_TTL",
+  "catalog-load-more",
+  "supportsCatalog",
+  "روابط التشغيل"
+]) {
+  if (!js.includes(required) && !html.includes(required)) {
+    throw new Error("Missing catalog/source regression guard: " + required);
+  }
+}
+if (/if \(addonDiscoveryCache\.has\(key\)\) return;\s*addonDiscoveryCache\.add\(key\);/.test(js)) {
+  throw new Error("Catalog requests must not be cached before a successful response.");
+}
+if (!js.includes('if(activeView!=="home"){section.hidden=true;return;}')) {
+  throw new Error("Recommendations should not recalculate outside the home view.");
+}
+
+console.log("RAIF Web structural and catalog/source regression checks passed.");
