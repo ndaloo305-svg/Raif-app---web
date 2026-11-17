@@ -175,7 +175,8 @@ function catalogIdentity(type, meta) {
 
 function mergeCatalogMeta(addon, entry, meta) {
   if (!meta?.id) return;
-  const type = entry.type === "anime" ? "anime" : entry.type;
+  const catalogHint = [entry?.id,entry?.name].filter(Boolean).join(" ");
+  const type = entry.type === "anime" || /anime|أنمي/i.test(catalogHint) ? "anime" : entry.type;
   const identity = catalogIdentity(type, meta);
   let item = addonCatalogIndex.get(identity);
   const provider = {addon, catalogEntry:entry, meta};
