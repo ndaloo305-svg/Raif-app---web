@@ -48,12 +48,12 @@ const addonDiscoveryErrors = [];
 const ADDON_MANIFEST_CACHE_TTL = 6 * 60 * 60 * 1000;
 function addonManifestStorageKey(addon){return currentUser&&addon?.id?"raif-addon-manifest-v1:"+currentUser.id+":"+addon.id:null;}
 function removeAddonManifestCache(addon){
-  removeAddonManifestCache(addon);
+  addonManifestCache.delete(addon.id);
   try{const key=addonManifestStorageKey(addon);if(key)localStorage.removeItem(key);}catch{}
 }
 function clearAddonManifestCache(){
-  clearAddonManifestCache();
-  addons.forEach(removeAddonManifestCache);
+  addonManifestCache.clear();
+  addons.forEach(addon=>{try{const key=addonManifestStorageKey(addon);if(key)localStorage.removeItem(key);}catch{}});
 }
 let addonDiscoveryRun = 0;
 
