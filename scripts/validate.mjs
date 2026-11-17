@@ -39,4 +39,15 @@ if (!js.includes('if(activeView!=="home"){section.hidden=true;return;}')) {
   throw new Error("Recommendations should not recalculate outside the home view.");
 }
 
-console.log("RAIF Web structural and catalog/source regression checks passed.");
+
+if (!js.includes("ADDON_MANIFEST_CACHE_TTL") || !js.includes("addonManifestStorageKey")) {
+  throw new Error("Persistent add-on Manifest caching is missing.");
+}
+if (/function clearAddonManifestCache\(\)\s*\{\s*clearAddonManifestCache\(\)/.test(js)) {
+  throw new Error("Manifest cache invalidation must not recurse.");
+}
+if (!js.includes("CATALOG_PAGE_SIZE = 100") || !js.includes("catalogPages")) {
+  throw new Error("On-demand catalog pagination state is missing.");
+}
+
+console.log("RAIF Web structural, cache, pagination and source regression checks passed.");
