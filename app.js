@@ -710,6 +710,7 @@ async function loadAddonDiscovery(view = activeView) {
         addonDiscoveryCache.add(job.key);
         scheduleRender();
       } catch(error) {
+        if (run !== addonDiscoveryRun) return;
         addonDiscoveryCache.delete(job.key);
         addonDiscoveryErrors.push({addon:job.addon.name || job.addon.addon_id,catalog:job.entry.name || job.entry.id,message:error.message});
         console.warn("RAIF catalog load failed:",job.addon.name,job.entry.id,error);
