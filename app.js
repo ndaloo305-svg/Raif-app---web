@@ -35,6 +35,8 @@ async function toggleTitleWatched(item){if(!currentUser){authDialog.showModal();
 async function markEpisodeWatched(item,episode){if(!currentUser){authDialog.showModal();setStatus(authStatus,"سجّل الدخول لتسجيل تقدم الحلقات.");return;}const id=String(episode?.id||"");if(!id)return;const existing=watchedRecords.find(record=>record.identity===item.identity&&record.episodeId===id);if(existing){watchedRecords=watchedRecords.filter(record=>!(record.identity===item.identity&&record.episodeId===id));queueWatchDelete(item.identity,id);saveWatchHistory();await flushWatchHistoryQueue();render();return;}const record={identity:item.identity,title:item.title,type:item.type,year:item.year,episodeId:id,episodeTitle:episode.title||"",season:episode.season??null,episode:episode.episode??null,watchedAt:new Date().toISOString()};watchedRecords.push(record);saveWatchHistory();await syncWatchRecord(record);render();}
 let addons = [];
 let addonCatalogItems = [];
+let addonCatalogIndex = new Map();
+let catalogDisplayLimit = 72;
 let addonCatalogLoading = false;
 const addonDiscoveryCache = new Set();
 const addonManifestCache = new Map();
@@ -50,7 +52,9 @@ const accountStatus = document.querySelector("#account-status");
 const sourceStatus = document.querySelector("#source-status");
 const typeNames = {movie:"فيلم",series:"مسلسل",anime:"أنمي"};
 
-const CATALOG_CACHE_VERSION = 1;
+const CATALOG_CACHE_VERSION = 2;
+const CATALOG_CACHE_TTL = 6 * 60 * 60 * 1000;
+const CATALOG_PAGE_SIZE = 72;
 function catalogCacheKey() {
   return currentUser ? "raif-catalog-cache-v" + CATALOG_CACHE_VERSION + ":" + currentUser.id : null;
 }
@@ -68,16 +72,21 @@ function saveCatalogCache() {
   }
 }
 function restoreCatalogCache() {
-  addonCatalogItems = [];
   const key = catalogCacheKey();
   if (!key) { render(); return; }
   try {
     const cached = JSON.parse(localStorage.getItem(key) || "null");
     if (cached?.version !== CATALOG_CACHE_VERSION || !Array.isArray(cached.entries)) { render(); return; }
     const enabled = new Map(addons.filter(addon => addon.enabled).map(addon => [addon.id,addon]));
+    const fresh = Number.isFinite(cached.savedAt) && Date.now() - cached.savedAt < CATALOG_CACHE_TTL;
     cached.entries.forEach(entry => {
       const addon = enabled.get(entry.addonId);
-      if (addon && entry.catalogEntry && entry.meta) mergeCatalogMeta(addon,entry.catalogEntry,entry.meta);
+      if (addon && entry.catalogEntry && entry.meta) {
+        mergeCatalogMeta(addon,entry.catalogEntry,entry.meta);
+        if (fresh && entry.catalogEntry.id && entry.catalogEntry.type) {
+          addonDiscoveryCache.add(addon.id + "|" + entry.catalogEntry.type + "|" + entry.catalogEntry.id);
+        }
+      }
     });
   } catch (error) {
     console.warn("RAIF catalog cache could not be restored:", error);
@@ -145,14 +154,16 @@ function mergeCatalogMeta(addon, entry, meta) {
   if (!meta?.id) return;
   const type = entry.type === "anime" ? "anime" : entry.type;
   const identity = catalogIdentity(type, meta);
-  let item = addonCatalogItems.find(candidate => candidate.identity === identity);
+  let item = addonCatalogIndex.get(identity);
   const provider = {addon, catalogEntry:entry, meta};
   if (item) {
     if (!item.providers.some(source => source.addon.id === addon.id && source.meta.id === meta.id)) item.providers.push(provider);
     if (!item.poster && meta.poster) item.poster = meta.poster;
     return;
   }
-  addonCatalogItems.push({_kind:"addon",identity,providers:[provider],addon,catalogEntry:entry,meta,id:meta.id,type,title:meta.name || meta.title || meta.id,year:meta.year || "",genre:Array.isArray(meta.genres) ? meta.genres.map(genreDisplayName).join("، ") : "",poster:meta.poster || ""});
+  item = {_kind:"addon",identity,providers:[provider],addon,catalogEntry:entry,meta,id:meta.id,type,title:meta.name || meta.title || meta.id,year:meta.year || "",genre:Array.isArray(meta.genres) ? meta.genres.map(genreDisplayName).join("، ") : "",poster:meta.poster || ""};
+  addonCatalogItems.push(item);
+  addonCatalogIndex.set(identity,item);
 }
 
 function getItemGenres(item) {
@@ -195,7 +206,7 @@ function renderContinueWatching(){
   });
   const entries=[...latestByIdentity.values()].map(record=>({
     record,
-    item:addonCatalogItems.find(item=>item.identity===record.identity)
+    item:addonCatalogIndex.get(record.identity)
   })).filter(entry=>entry.item).sort((a,b)=>Date.parse(b.record.watchedAt||0)-Date.parse(a.record.watchedAt||0)).slice(0,8);
   section.hidden=activeView!=="home"||entries.length===0;
   entries.forEach(({record,item})=>{
@@ -261,8 +272,13 @@ function render() {
     return activeSort==="latest" ? by-ay : ay-by;
   });
   else if(activeSort==="title") filtered.sort((a,b)=>(a.title||"").localeCompare(b.title||"","ar"));
+  const totalFiltered = filtered.length;
+  const visibleItems = filtered.slice(0,catalogDisplayLimit);
   const catalogFragment=document.createDocumentFragment();
-  filtered.forEach(item=>{
+  const watchedTitles = new Set(watchedRecords.filter(record=>!record.episodeId).map(record=>record.identity));
+  const episodeCounts = new Map();
+  watchedRecords.forEach(record=>{if(record.episodeId){let ids=episodeCounts.get(record.identity);if(!ids){ids=new Set();episodeCounts.set(record.identity,ids);}ids.add(record.episodeId);}});
+  visibleItems.forEach(item=>{
     const card=document.createElement("article");card.className="media-card";card.tabIndex=0;card.setAttribute("role","button");card.setAttribute("aria-label","تفاصيل "+item.title);
     const poster=document.createElement("div");poster.className="poster";
     const url=safeAddonAssetUrl(item.poster,item.addon.manifest_url);
@@ -271,16 +287,21 @@ function render() {
     const badges=document.createElement("div");badges.className="poster-badges";
     const type=document.createElement("span");type.textContent=typeNames[item.type]||item.type;badges.append(type);
     if(savedIds.includes(item.identity)){const b=document.createElement("span");b.className="poster-saved";b.textContent="＋ قائمتي";badges.append(b);}
-    if(isTitleWatched(item)){const b=document.createElement("span");b.className="poster-watched";b.textContent="✓ شاهدته";badges.append(b);}
+    if(watchedTitles.has(item.identity)){const b=document.createElement("span");b.className="poster-watched";b.textContent="✓ شاهدته";badges.append(b);}
     poster.append(badges);
     const title=document.createElement("div");title.className="media-title";title.textContent=item.title||"عنوان بدون اسم";
-    const progress=getEpisodeWatchCount(item.identity);
+    const progress=episodeCounts.get(item.identity)?.size || 0;
     const meta=document.createElement("div");meta.className="media-meta";meta.textContent=[item.year,item.genre,item.providers.length+" مصدر",progress?progress+" حلقة مشاهدة":""].filter(Boolean).join(" · ");
     card.append(poster,title,meta);card.addEventListener("click",()=>openAddonMeta(item.addon,item.catalogEntry,item.meta,item.providers));
     card.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();card.click();}});catalogFragment.append(card);
   });
   catalog.replaceChildren(catalogFragment);
-  const count=document.querySelector("#catalog-count");if(count)count.textContent=filtered.length.toLocaleString("ar")+" عنوان · "+filtered.reduce((n,x)=>n+x.providers.length,0).toLocaleString("ar")+" نتائج مصادر";
+  const loadMore = document.querySelector("#catalog-load-more");
+  if (loadMore) {
+    loadMore.hidden = totalFiltered <= visibleItems.length;
+    loadMore.textContent = "عرض المزيد · " + (totalFiltered-visibleItems.length).toLocaleString("ar") + " متبقي";
+  }
+  const count=document.querySelector("#catalog-count");if(count)count.textContent=totalFiltered.toLocaleString("ar")+" عنوان · "+filtered.reduce((n,x)=>n+x.providers.length,0).toLocaleString("ar")+" نتائج مصادر";
   const messages={library:currentUser?"قائمتك فارغة حالياً. أضف العناوين من صفحة التفاصيل.":"سجّل الدخول لعرض قائمتك.",watched:currentUser?"لم تسجّل أي عنوان كمشاهد حتى الآن.":"سجّل الدخول لعرض سجل المشاهدة.",progress:currentUser?"لا يوجد تقدم مسجل للحلقات حتى الآن.":"سجّل الدخول لمتابعة تقدم المسلسلات."};
   if(messages[activeView])empty.textContent=messages[activeView];
   else if(!currentUser)empty.textContent="سجّل الدخول أولاً لتحميل كتالوجات مصادرك.";
@@ -430,9 +451,9 @@ async function testAddonConnection(addon,button,status){
   try{
     addonManifestCache.delete(addon.id);
     const manifest=await fetchAddonResource(addon,"manifest");
-    if(!manifest||!Array.isArray(manifest.resources)||!Array.isArray(manifest.catalogs))throw new Error("Manifest غير صالح أو لا يطابق بنية Stremio.");
+    if(!manifest||!Array.isArray(manifest.resources))throw new Error("Manifest غير صالح أو لا يطابق بنية Stremio.");
     const resources=manifest.resources.map(resource=>typeof resource==="string"?resource:resource?.name).filter(Boolean);
-    const catalogCount=manifest.catalogs.filter(entry=>entry?.id&&entry?.type).length;
+    const catalogCount=(Array.isArray(manifest.catalogs)?manifest.catalogs:[]).filter(entry=>entry?.id&&entry?.type).length;
     const supportsStreams=resources.includes("stream");
     const supportsSubtitles=resources.includes("subtitles");
     const parts=["اتصال ناجح",catalogCount+" كتالوج"];
@@ -468,7 +489,7 @@ async function loadSources() {
     return;
   }
   addons = data || [];
-  restoreCatalogCache();
+  if (!addonCatalogItems.length) restoreCatalogCache();
   if (!addons.length) {
     const message = document.createElement("p");
     message.className = "empty-state";
@@ -650,7 +671,9 @@ async function loadAddonDiscovery(view = activeView) {
           "كتالوج " + (job.entry.name || job.entry.id)
         );
         if (run !== addonDiscoveryRun) return;
-        (Array.isArray(data?.metas) ? data.metas : []).forEach(meta => mergeCatalogMeta(job.addon,job.entry,meta));
+        if (!Array.isArray(data?.metas)) throw new Error("استجابة الكتالوج لا تحتوي قائمة عناوين صالحة.");
+        data.metas.forEach(meta => mergeCatalogMeta(job.addon,job.entry,meta));
+        addonDiscoveryCache.add(job.key);
         scheduleRender();
       } catch(error) {
         addonDiscoveryCache.delete(job.key);
@@ -698,7 +721,7 @@ async function inspectAddon(addon) {
     if (!manifestUrl) throw new Error("الرابط غير آمن. استخدم رابط HTTPS صحيحاً.");
     const manifest = await fetchAddonResource(addon, "manifest");
     if (!manifest || typeof manifest !== "object" || !manifest.id || !manifest.name ||
-        !Array.isArray(manifest.resources) || !Array.isArray(manifest.catalogs)) {
+        !Array.isArray(manifest.resources)) {
       throw new Error("ملف Manifest لا يطابق بنية إضافة Stremio المتوقعة.");
     }
     if (manifestHasUnsupportedDelivery(manifest)) {
@@ -707,13 +730,17 @@ async function inspectAddon(addon) {
     const resourceNames = manifest.resources.map(resource =>
       typeof resource === "string" ? resource : resource?.name
     ).filter(Boolean);
-    const supportsCatalog = resourceNames.includes("catalog");
-    if (!supportsCatalog || manifest.catalogs.length === 0) {
-      if (resourceNames.includes("subtitles")) {
-        renderAddonMessage("هذا مصدر ترجمات. ستظهر ترجماته عند فتح عنوان من أحد كتالوجات RAIF.");
+    const catalogs = Array.isArray(manifest.catalogs) ? manifest.catalogs : [];
+    const supportsCatalog = resourceNames.includes("catalog") && catalogs.length > 0;
+    if (!supportsCatalog) {
+      const capabilities = [];
+      if (resourceNames.includes("stream")) capabilities.push("روابط التشغيل");
+      if (resourceNames.includes("subtitles")) capabilities.push("الترجمات");
+      if (capabilities.length) {
+        renderAddonMessage("تم التعرف على هذا المصدر: " + capabilities.join(" و") + ". لا يعرض كتالوجاً مستقلاً؛ ستظهر وظائفه عند فتح عنوان مناسب.");
         return;
       }
-      throw new Error("هذا المصدر لا يعلن عن كتالوج قابل للعرض أو مورد ترجمات.");
+      throw new Error("هذا المصدر لا يعلن عن كتالوج أو تشغيل أو ترجمات.");
     }
 
     addonCatalogResults.replaceChildren();
@@ -742,7 +769,7 @@ async function inspectAddon(addon) {
 
     const catalogButtons = document.createElement("div");
     catalogButtons.className = "addon-catalog-buttons";
-    manifest.catalogs.forEach(entry => {
+    catalogs.forEach(entry => {
       if (!entry || !entry.type || !entry.id) return;
       const button = document.createElement("button");
       button.type = "button";
@@ -1418,6 +1445,8 @@ async function updateSource(id, changes) {
   setStatus(sourceStatus, "تم تحديث حالة المصدر.");
   await loadSources();
   addonDiscoveryCache.clear(); addonManifestCache.clear();
+  addonCatalogItems = []; addonCatalogIndex.clear();
+  restoreCatalogCache();
   if (activeView !== "sources" && activeView !== "library") loadAddonDiscovery(activeView);
 }
 
@@ -1429,7 +1458,8 @@ async function deleteSource(id) {
   }
   setStatus(sourceStatus, "تم حذف المصدر من حسابك.");
   await loadSources();
-  addonDiscoveryCache.clear(); addonManifestCache.clear(); addonCatalogItems = [];
+  addonDiscoveryCache.clear(); addonManifestCache.clear(); addonCatalogItems = []; addonCatalogIndex.clear();
+  restoreCatalogCache();
   if (activeView !== "sources" && activeView !== "library") loadAddonDiscovery(activeView);
 }
 
@@ -1472,7 +1502,8 @@ document.querySelector("#source-form").addEventListener("submit", async event =>
   urlInput.value = "";
   setStatus(sourceStatus, "تم حفظ المصدر في حسابك.");
   await loadSources();
-  addonDiscoveryCache.clear(); addonManifestCache.clear(); addonCatalogItems = [];
+  addonDiscoveryCache.clear(); addonManifestCache.clear(); addonCatalogItems = []; addonCatalogIndex.clear();
+  restoreCatalogCache();
   if (activeView !== "sources" && activeView !== "library") loadAddonDiscovery(activeView);
 });
 
@@ -1572,16 +1603,27 @@ document.querySelector("#source-import-button").addEventListener("click", async 
 document.querySelectorAll(".filter").forEach(button => button.addEventListener("click", () => {
   activeFilter = button.dataset.filter;
   activeGenre = "all";
+  catalogDisplayLimit = CATALOG_PAGE_SIZE;
   document.querySelectorAll(".filter").forEach(entry => entry.classList.toggle("active", entry === button));
   render();
 }));
 
 document.querySelector("#catalog-sort")?.addEventListener("change", event => {
   activeSort = event.target.value;
+  catalogDisplayLimit = CATALOG_PAGE_SIZE;
+  render();
+});
+document.querySelector("#catalog-load-more")?.addEventListener("click", () => {
+  catalogDisplayLimit += CATALOG_PAGE_SIZE;
   render();
 });
 
-search.addEventListener("input", render);
+let searchRenderTimer = null;
+search.addEventListener("input", () => {
+  catalogDisplayLimit = CATALOG_PAGE_SIZE;
+  if (searchRenderTimer !== null) clearTimeout(searchRenderTimer);
+  searchRenderTimer = setTimeout(() => { searchRenderTimer = null; render(); }, 160);
+});
 document.querySelector("#refresh-catalog")?.addEventListener("click", () => {
   addonDiscoveryCache.clear(); addonManifestCache.clear(); addonDiscoveryErrors.length = 0;
   loadAddonDiscovery(activeView);
@@ -1605,6 +1647,7 @@ document.querySelectorAll(".nav-item").forEach(button => button.addEventListener
   const map = {home:"all",movies:"movie",series:"series",anime:"anime",library:"all",watched:"all",progress:"all"};
   activeFilter = map[activeView] || "all";
   activeGenre = "all";
+  catalogDisplayLimit = CATALOG_PAGE_SIZE;
   document.querySelectorAll(".nav-item").forEach(entry => entry.classList.toggle("active", entry === button));
   document.querySelectorAll(".filter").forEach(entry => entry.classList.toggle("active", entry.dataset.filter === activeFilter));
   const isSources = activeView === "sources";
