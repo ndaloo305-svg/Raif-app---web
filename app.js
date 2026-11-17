@@ -1015,7 +1015,7 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta, providers = [{add
     manualPlaybackHeading.textContent="روابط البث التي أضفتها";
     const manualPlaybackHint=document.createElement("p");
     manualPlaybackHint.className="manual-playback-hint";
-    manualPlaybackHint.textContent="أضف سيرفراتك لهذا الفيلم أو للحلقة المحددة. الروابط تحفظ في حساب RAIF وتظهر على أجهزتك الأخرى.";
+    manualPlaybackHint.textContent="أضف سيرفرات متعددة لهذا العنوان أو للحلقة المحددة. تحفظ الروابط في حساب RAIF وتظهر على أجهزتك الأخرى.";
     const manualPlaybackForm=document.createElement("form");
     manualPlaybackForm.className="manual-playback-form";
     const manualServerInput=document.createElement("input");
@@ -1037,6 +1037,7 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta, providers = [{add
       if(!currentUser){manualPlaybackStatus.textContent="سجّل الدخول لعرض روابط البث المحفوظة.";return;}
       const episode=getSelectedEpisode();
       const episodeKey=episode?.id?String(episode.id):"";
+      manualPlaybackHint.textContent=episode?"روابط البث للحلقة المحددة: "+(episode.title||("الحلقة "+(episode.episode??""))) + ".":"روابط البث المحفوظة لهذا العنوان. اختر حلقة لعرض روابطها المستقلة.";
       manualPlaybackStatus.textContent="جارٍ تحميل روابط البث...";
       const {data,error}=await supabase.from("playback_sources")
         .select("id,server_name,stream_url,stream_format,quality_label,language,episode_key,episode_title,season_number,episode_number,sort_order")
@@ -1050,7 +1051,7 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta, providers = [{add
       if(request!==manualSourceRequest)return;
       if(error){manualPlaybackStatus.textContent="تعذر تحميل روابط البث: "+error.message;manualPlaybackStatus.classList.add("is-error");return;}
       manualPlaybackStatus.classList.remove("is-error");
-      manualPlaybackStatus.textContent=data?.length?"عدد السيرفرات المحفوظة: "+data.length.toLocaleString("ar"):"لا توجد روابط محفوظة لهذا "+(episode?"الحلقة.":"الفيلم بعد.");
+      manualPlaybackStatus.textContent=data?.length?"عدد السيرفرات المحفوظة: "+data.length.toLocaleString("ar"):"لا توجد روابط محفوظة لهذا "+(episode?"الحلقة بعد.":trackedItem.type==="movie"?"الفيلم بعد.":"المسلسل بعد.");
       (data||[]).forEach((source,index)=>{
         const row=document.createElement("article");row.className="manual-playback-row";
         const details=document.createElement("div");details.className="manual-playback-details";
