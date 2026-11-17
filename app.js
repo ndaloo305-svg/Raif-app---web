@@ -597,15 +597,22 @@ async function loadAddonDiscovery(view = activeView) {
     promise,
     new Promise((_,reject) => setTimeout(() => reject(new Error("انتهت مهلة الاتصال: " + label)),ms))
   ]);
-  const manifestResults = await Promise.allSettled(enabled.map(async addon => {
-    try {
-      const manifest = await withTimeout(fetchAddonResource(addon,"manifest"),"Manifest " + (addon.name || addon.addon_id));
-      return {addon,manifest};
-    } catch(error) {
-      addonManifestCache.delete(addon.id);
-      throw Object.assign(new Error(error.message),{addon});
+  const manifestResults = new Array(enabled.length);
+  let manifestCursor = 0;
+  const manifestWorker = async () => {
+    while (manifestCursor < enabled.length && run === addonDiscoveryRun) {
+      const index = manifestCursor++;
+      const addon = enabled[index];
+      try {
+        const manifest = await withTimeout(fetchAddonResource(addon,"manifest"),"Manifest " + (addon.name || addon.addon_id));
+        manifestResults[index] = {status:"fulfilled",value:{addon,manifest}};
+      } catch(error) {
+        addonManifestCache.delete(addon.id);
+        manifestResults[index] = {status:"rejected",reason:Object.assign(new Error(error.message),{addon})};
+      }
     }
-  }));
+  };
+  await Promise.all(Array.from({length:Math.min(5,enabled.length)},() => manifestWorker()));
   if (run !== addonDiscoveryRun) return;
   const jobs = [];
   manifestResults.forEach(result => {
@@ -626,14 +633,13 @@ async function loadAddonDiscovery(view = activeView) {
     });
   });
   let cursor = 0;
-  let renderQueued = false;
+  let renderTimer = null;
   const scheduleRender = () => {
-    if (renderQueued) return;
-    renderQueued = true;
-    requestAnimationFrame(() => {
-      renderQueued = false;
+    if (renderTimer !== null) return;
+    renderTimer = setTimeout(() => {
+      renderTimer = null;
       if (run === addonDiscoveryRun) render();
-    });
+    },350);
   };
   const worker = async () => {
     while (cursor < jobs.length && run === addonDiscoveryRun) {
