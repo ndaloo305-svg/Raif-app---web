@@ -206,3 +206,8 @@
 .manual-playback-actions .save-btn,.manual-playback-actions .source-remove{padding:8px 11px;font-size:11px}
 .manual-playback-actions button:disabled{opacity:.5}
 @media(max-width:560px){.manual-playback-form{grid-template-columns:1fr}.manual-playback-form input[type=url]{grid-column:auto}.manual-playback-row{align-items:flex-start;flex-direction:column}.manual-playback-actions{width:100%}}
+
+.player-fallback-button{margin:8px 0 12px}
+.player-fallback-button[hidden]{display:none}
+.manual-playback-actions{flex-wrap:wrap}
+.manual-playback-actions .save-btn:disabled{opacity:.55;cursor:default}
