@@ -50,6 +50,10 @@ The source manager reads enabled add-on HTTPS Manifests through the authenticate
 - Requests are routed through the RAIF Supabase Edge Function proxy; the source server does not need to expose browser CORS to the client for proxied metadata requests.
 - Catalog browsing supports required and optional extra parameters declared by the add-on.
 - The source manager includes a live Manifest health check that reports catalog count and whether the add-on declares stream and subtitle resources.
+- The source manager accepts catalog-only, stream-only, and subtitle-only add-ons; a stream-only add-on is identified as a playback provider rather than incorrectly rejected for having no catalog.
+- Catalog responses are cached per signed-in account for six hours, displayed from cache immediately, and refreshed when stale. A failed or interrupted catalog request is not marked as completed, so switching sections cannot permanently hide its results.
+- Discovery uses bounded concurrency and batches UI updates. The catalog renders a limited first batch, then loads more cards locally or requests the next catalog pages on demand to avoid building a huge grid on iPhone.
+- Catalogs are merged through a stable identity index, reducing repeated full-list scans when multiple add-ons return the same title.
 - Direct playback is possible only when a source returns a browser-compatible authorized URL. DRM, torrent and sources requiring custom headers are not supported.
 
 
