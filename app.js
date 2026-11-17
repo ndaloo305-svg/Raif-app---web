@@ -87,7 +87,9 @@ function restoreCatalogCache() {
     if (Array.isArray(cached.catalogPages)) cached.catalogPages.forEach(page => {
       const addon = enabled.get(page.addonId);
       if (addon && page.entry?.id && page.entry?.type && Number.isFinite(page.nextSkip)) {
-        addonCatalogPages.set(addon.id + "|" + page.entry.type + "|" + page.entry.id,{addon,entry:page.entry,nextSkip:page.nextSkip,hasMore:page.hasMore===true,loading:false});
+        const pageKey = addon.id + "|" + page.entry.type + "|" + page.entry.id;
+        addonCatalogPages.set(pageKey,{addon,entry:page.entry,nextSkip:page.nextSkip,hasMore:page.hasMore===true,loading:false});
+        if (fresh) addonDiscoveryCache.add(pageKey);
       }
     });
     cached.entries.forEach(entry => {
@@ -252,6 +254,7 @@ function renderRecommendations(){
   const section=document.querySelector("#recommendations");
   const host=document.querySelector("#recommendations-list");
   if(!section||!host)return;
+  if(activeView!=="home"){section.hidden=true;return;}
   host.replaceChildren();
   const seedIds=new Set([...savedIds,...watchedRecords.map(record=>record.identity)]);
   const seeds=addonCatalogItems.filter(item=>seedIds.has(item.identity));
@@ -1722,6 +1725,7 @@ document.querySelectorAll(".nav-item").forEach(button => button.addEventListener
       ({home:"اكتشف المحتوى",movies:"الأفلام",series:"المسلسلات",anime:"الأنمي",library:"قائمتي",watched:"سجل المشاهدة",progress:"تقدم المسلسلات"})[activeView];
     render();
     if (["home","movies","series","anime"].includes(activeView)) loadAddonDiscovery(activeView);
+    else { addonDiscoveryRun++; addonCatalogLoading = false; }
   } else {
     addonDiscoveryRun++;
     addonCatalogLoading = false;
