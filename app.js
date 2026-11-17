@@ -169,8 +169,20 @@ function mergeCatalogMeta(addon, entry, meta) {
   let item = addonCatalogIndex.get(identity);
   const provider = {addon, catalogEntry:entry, meta};
   if (item) {
-    if (!item.providers.some(source => source.addon.id === addon.id && source.meta.id === meta.id)) item.providers.push(provider);
+    const existingProvider = item.providers.find(source => source.addon.id === addon.id && source.meta.id === meta.id);
+    if (existingProvider) {
+      existingProvider.catalogEntry = entry;
+      existingProvider.meta = meta;
+    } else item.providers.push(provider);
     if (!item.poster && meta.poster) item.poster = meta.poster;
+    if (item.addon.id === addon.id && item.meta.id === meta.id) {
+      item.meta = meta;
+      item.catalogEntry = entry;
+      item.title = meta.name || meta.title || meta.id;
+      item.year = meta.year || "";
+      item.genre = Array.isArray(meta.genres) ? meta.genres.map(genreDisplayName).join("، ") : "";
+      item.poster = meta.poster || item.poster;
+    }
     return;
   }
   item = {_kind:"addon",identity,providers:[provider],addon,catalogEntry:entry,meta,id:meta.id,type,title:meta.name || meta.title || meta.id,year:meta.year || "",genre:Array.isArray(meta.genres) ? meta.genres.map(genreDisplayName).join("، ") : "",poster:meta.poster || ""};
@@ -1655,14 +1667,14 @@ document.querySelector("#source-import-button").addEventListener("click", async 
 document.querySelectorAll(".filter").forEach(button => button.addEventListener("click", () => {
   activeFilter = button.dataset.filter;
   activeGenre = "all";
-  catalogDisplayLimit = CATALOG_PAGE_SIZE;
+  catalogDisplayLimit = CATALOG_VISIBLE_BATCH;
   document.querySelectorAll(".filter").forEach(entry => entry.classList.toggle("active", entry === button));
   render();
 }));
 
 document.querySelector("#catalog-sort")?.addEventListener("change", event => {
   activeSort = event.target.value;
-  catalogDisplayLimit = CATALOG_PAGE_SIZE;
+  catalogDisplayLimit = CATALOG_VISIBLE_BATCH;
   render();
 });
 document.querySelector("#catalog-load-more")?.addEventListener("click", async () => {
@@ -1672,7 +1684,7 @@ document.querySelector("#catalog-load-more")?.addEventListener("click", async ()
 
 let searchRenderTimer = null;
 search.addEventListener("input", () => {
-  catalogDisplayLimit = CATALOG_PAGE_SIZE;
+  catalogDisplayLimit = CATALOG_VISIBLE_BATCH;
   if (searchRenderTimer !== null) clearTimeout(searchRenderTimer);
   searchRenderTimer = setTimeout(() => { searchRenderTimer = null; render(); }, 160);
 });
@@ -1699,7 +1711,7 @@ document.querySelectorAll(".nav-item").forEach(button => button.addEventListener
   const map = {home:"all",movies:"movie",series:"series",anime:"anime",library:"all",watched:"all",progress:"all"};
   activeFilter = map[activeView] || "all";
   activeGenre = "all";
-  catalogDisplayLimit = CATALOG_PAGE_SIZE;
+  catalogDisplayLimit = CATALOG_VISIBLE_BATCH;
   document.querySelectorAll(".nav-item").forEach(entry => entry.classList.toggle("active", entry === button));
   document.querySelectorAll(".filter").forEach(entry => entry.classList.toggle("active", entry.dataset.filter === activeFilter));
   const isSources = activeView === "sources";
