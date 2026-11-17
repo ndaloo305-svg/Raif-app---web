@@ -59,7 +59,6 @@ const typeNames = {movie:"فيلم",series:"مسلسل",anime:"أنمي"};
 const CATALOG_CACHE_VERSION = 2;
 const CATALOG_CACHE_TTL = 6 * 60 * 60 * 1000;
 const CATALOG_VISIBLE_BATCH = 72;
-const CATALOG_PAGE_SIZE = 72;
 function catalogCacheKey() {
   return currentUser ? "raif-catalog-cache-v" + CATALOG_CACHE_VERSION + ":" + currentUser.id : null;
 }
