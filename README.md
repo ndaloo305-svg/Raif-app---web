@@ -55,7 +55,7 @@ The source manager reads enabled add-on HTTPS Manifests through the authenticate
 
 ## Playback links
 
-RAIF does not need a discovery directory for streaming platforms. Playback links will be supplied by the project owner and organized against the matching movie or series episode. The player will validate supported URL formats and browser compatibility, and report failures clearly. A URL being saved does not by itself guarantee that the host allows browser playback; HLS/DASH may require appropriate CORS support, and DRM or custom-header-only streams are not supported by the current web player.
+RAIF does not include a streaming-platform discovery directory. The project owner can add multiple playback servers to each movie or exact series episode from the title details. RAIF saves the server name, HTTPS URL, format, quality, and language in the shared account, and provides play/delete actions. A URL being saved does not by itself guarantee that the host allows browser playback; HLS/DASH may require appropriate CORS support, and DRM or custom-header-only streams are not supported by the current web player.
 
 
 ### Owner-managed playback sources
