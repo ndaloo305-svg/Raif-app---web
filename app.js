@@ -723,6 +723,9 @@ async function inspectAddon(addon) {
 let activeHlsPlayer = null;
 let activeDashPlayer = null;
 let selectedSubtitle = null;
+let playbackFallbackQueue = [];
+function reportPlaybackFailure(message){const status=document.querySelector('#player-status');const button=document.querySelector('#player-fallback-button');status.textContent=message;status.classList.add('is-error');if(button){button.hidden=playbackFallbackQueue.length===0;button.textContent=playbackFallbackQueue.length?'تعذّر التشغيل — جرّب السيرفر التالي ('+playbackFallbackQueue.length+')':'';}}
+async function playNextFallback(){const next=playbackFallbackQueue.shift();if(!next)return;const mime=({hls:'application/vnd.apple.mpegurl',mp4:'video/mp4',dash:'application/dash+xml',webm:'video/webm'})[next.stream_format]||'';await openStreamPlayer(next.stream_url,next.title||('السيرفر: '+(next.server_name||'بديل')),{type:mime,filename:next.stream_url,fallbackSources:playbackFallbackQueue});}
 
 function applySelectedSubtitle(video) {
   video.querySelectorAll('track[data-raif-subtitle="true"]').forEach(track => track.remove());
@@ -849,70 +852,23 @@ function disposeStreamPlayer() {
     video.load();
   }
 }
-async function openStreamPlayer(rawUrl, title = "RAIF Player", stream = {}) {
-  let target;
-  try { target = new URL(rawUrl); } catch { throw new Error("رابط التشغيل غير صالح."); }
-  if (!["https:", "http:"].includes(target.protocol) || target.username || target.password) throw new Error("المشغل يقبل روابط HTTP وHTTPS فقط.");
-  if (target.protocol === "http:" && location.protocol === "https:") throw new Error("المتصفح يمنع تشغيل HTTP داخل صفحة HTTPS. استخدم رابط HTTPS.");
-  const dialog = document.querySelector("#player-dialog");
-  const video = document.querySelector("#raif-video");
-  const status = document.querySelector("#player-status");
-  document.querySelector("#player-title").textContent = title;
-  status.textContent = "جارٍ تجهيز المشغل...";
-  status.classList.remove("is-error");
-  disposeStreamPlayer();
-  applySelectedSubtitle(video);
-  dialog.showModal();
-  const mime = String(stream.behaviorHints?.mimeType || stream.mimeType || stream.type || "").toLowerCase();
-  const filename = String(stream.behaviorHints?.filename || stream.filename || "");
-  const mediaHint = (target.pathname + " " + filename).toLowerCase();
-  const isHls = /\.m3u8(?:$|[?#\s])/.test(mediaHint) || /mpegurl|vnd\.apple\.mpegurl/.test(mime);
-  const isDash = /\.mpd(?:$|[?#\s])/.test(mediaHint) || /dash\+xml/.test(mime);
-  video.onerror = () => { status.textContent = "تعذر تشغيل الرابط. تأكد أن الرابط ملف وسائط مباشر، وأن الخادم يسمح بالوصول من المتصفح (CORS)."; status.classList.add("is-error"); };
-  video.onplaying = () => { status.textContent = "يتم التشغيل داخل RAIF."; status.classList.remove("is-error"); };
-  const startPlayback = () => video.play().catch(error => {
-    status.textContent = error?.name === "NotSupportedError"
-      ? "صيغة الفيديو غير مدعومة في متصفحك. اختر رابط HLS أو MP4 من المصادر."
-      : "تعذر بدء التشغيل تلقائياً؛ اضغط زر التشغيل داخل الفيديو.";
-    status.classList.add("is-error");
-  });
-  if (isHls && video.canPlayType("application/vnd.apple.mpegurl")) {
-    video.src = target.href;
-    status.textContent = "جارٍ بدء بث HLS...";
-    startPlayback();
-  } else if (isHls) {
-    try {
-      const {default: Hls} = await import("https://esm.sh/hls.js@1.6.13");
-      if (!Hls.isSupported()) throw new Error("المتصفح لا يدعم HLS عبر Media Source Extensions.");
-      activeHlsPlayer = new Hls({enableWorker:true, lowLatencyMode:false, maxBufferLength:30});
-      activeHlsPlayer.attachMedia(video);
-      activeHlsPlayer.on(Hls.Events.MEDIA_ATTACHED, () => activeHlsPlayer?.loadSource(target.href));
-      activeHlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => {
-        status.textContent = "تم تحميل قائمة HLS. جارٍ التشغيل...";
-        startPlayback();
-      });
-      activeHlsPlayer.on(Hls.Events.ERROR, (_event, data) => {
-        if (data.fatal) { status.textContent = "تعذر تشغيل HLS. تحقق من الرابط ودعم CORS."; status.classList.add("is-error"); }
-      });
-    } catch (error) { status.textContent = "تعذر تجهيز HLS: " + error.message; status.classList.add("is-error"); }
-  } else if (isDash) {
-    try {
-      const module = await import("https://esm.sh/dashjs@5.0.3");
-      const dashjs = module.default || module;
-      activeDashPlayer = dashjs.MediaPlayer().create();
-      activeDashPlayer.initialize(video, target.href, false);
-      activeDashPlayer.on(dashjs.MediaPlayer.events.ERROR, () => {
-        status.textContent = "تعذر تشغيل DASH. تحقق من الرابط ودعم CORS.";
-        status.classList.add("is-error");
-      });
-      status.textContent = "تم تحميل مشغل DASH. جارٍ التشغيل...";
-      startPlayback();
-    } catch (error) { status.textContent = "تعذر تجهيز DASH: " + error.message; status.classList.add("is-error"); }
-  } else {
-    video.src = target.href;
-    status.textContent = "جارٍ بدء تشغيل الفيديو...";
-    startPlayback();
-  }
+async function openStreamPlayer(rawUrl,title="RAIF Player",stream={}){
+  let target;try{target=new URL(rawUrl);}catch{throw new Error("رابط التشغيل غير صالح.");}
+  if(!["https:","http:"].includes(target.protocol)||target.username||target.password)throw new Error("المشغل يقبل روابط HTTP وHTTPS فقط.");
+  if(target.protocol==="http:"&&location.protocol==="https:")throw new Error("المتصفح يمنع تشغيل HTTP داخل صفحة HTTPS. استخدم رابط HTTPS.");
+  playbackFallbackQueue=Array.isArray(stream.fallbackSources)?stream.fallbackSources.slice():[];
+  const dialog=document.querySelector("#player-dialog"),video=document.querySelector("#raif-video"),status=document.querySelector("#player-status"),fallbackButton=document.querySelector("#player-fallback-button");
+  document.querySelector("#player-title").textContent=title;status.textContent="جارٍ تجهيز المشغل...";status.classList.remove("is-error");fallbackButton.hidden=true;
+  disposeStreamPlayer();applySelectedSubtitle(video);dialog.showModal();
+  const mime=String(stream.behaviorHints?.mimeType||stream.mimeType||stream.type||"").toLowerCase(),filename=String(stream.behaviorHints?.filename||stream.filename||""),mediaHint=(target.pathname+" "+filename).toLowerCase();
+  const isHls=/\.m3u8(?:$|[?#\s])/.test(mediaHint)||/mpegurl|vnd\.apple\.mpegurl/.test(mime),isDash=/\.mpd(?:$|[?#\s])/.test(mediaHint)||/dash\+xml/.test(mime);
+  video.onerror=()=>reportPlaybackFailure("تعذر تشغيل الرابط. تحقق من الرابط ودعم المتصفح وCORS في خادم الوسائط.");
+  video.onplaying=()=>{status.textContent="يتم التشغيل داخل RAIF.";status.classList.remove("is-error");fallbackButton.hidden=true;};
+  const startPlayback=()=>video.play().catch(error=>{if(error?.name==="NotSupportedError")reportPlaybackFailure("صيغة الفيديو غير مدعومة في هذا المتصفح.");else{status.textContent="تعذر بدء التشغيل تلقائياً؛ اضغط زر التشغيل داخل الفيديو.";status.classList.add("is-error");}});
+  if(isHls&&video.canPlayType("application/vnd.apple.mpegurl")){video.src=target.href;status.textContent="جارٍ بدء بث HLS...";startPlayback();}
+  else if(isHls){try{const{default:Hls}=await import("https://esm.sh/hls.js@1.6.13");if(!Hls.isSupported())throw new Error("المتصفح لا يدعم HLS عبر Media Source Extensions.");activeHlsPlayer=new Hls({enableWorker:true,lowLatencyMode:false,maxBufferLength:30});activeHlsPlayer.attachMedia(video);activeHlsPlayer.on(Hls.Events.MEDIA_ATTACHED,()=>activeHlsPlayer?.loadSource(target.href));activeHlsPlayer.on(Hls.Events.MANIFEST_PARSED,()=>{status.textContent="تم تحميل قائمة HLS. جارٍ التشغيل...";startPlayback();});activeHlsPlayer.on(Hls.Events.ERROR,(_event,data)=>{if(data.fatal)reportPlaybackFailure("تعذر تشغيل HLS. تحقق من الرابط ودعم CORS.");});}catch(error){reportPlaybackFailure("تعذر تجهيز HLS: "+error.message);}}
+  else if(isDash){try{const module=await import("https://esm.sh/dashjs@5.0.3"),dashjs=module.default||module;activeDashPlayer=dashjs.MediaPlayer().create();activeDashPlayer.initialize(video,target.href,false);activeDashPlayer.on(dashjs.MediaPlayer.events.ERROR,()=>reportPlaybackFailure("تعذر تشغيل DASH. تحقق من الرابط ودعم CORS."));status.textContent="تم تحميل مشغل DASH. جارٍ التشغيل...";startPlayback();}catch(error){reportPlaybackFailure("تعذر تجهيز DASH: "+error.message);}}
+  else{video.src=target.href;status.textContent="جارٍ بدء تشغيل الفيديو...";startPlayback();}
 }
 
 async function openAddonMeta(addon, catalogEntry, catalogMeta, providers = [{addon,catalogEntry,meta:catalogMeta}]) {
@@ -1055,7 +1011,7 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta, providers = [{add
       (data||[]).forEach((source,index)=>{
         const row=document.createElement("article");row.className="manual-playback-row";
         const details=document.createElement("div");details.className="manual-playback-details";
-        const name=document.createElement("strong");name.textContent=source.server_name||("سيرفر "+(index+1));
+        const name=document.createElement("strong");name.textContent=(index===0?"★ أساسي · ":"")+(source.server_name||("سيرفر "+(index+1)));
         const metadata=[source.quality_label,source.language,({auto:"تلقائي",hls:"HLS",mp4:"MP4",dash:"DASH",webm:"WebM"})[source.stream_format]||source.stream_format].filter(Boolean);
         const info=document.createElement("span");info.textContent=metadata.join(" · ")||"مصدر بث";
         const address=document.createElement("small");address.textContent=source.stream_url;address.dir="ltr";
@@ -1064,8 +1020,19 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta, providers = [{add
         const play=document.createElement("button");play.type="button";play.className="save-btn";play.textContent="تشغيل";
         play.addEventListener("click",async()=>{
           const mime=({hls:"application/vnd.apple.mpegurl",mp4:"video/mp4",dash:"application/dash+xml",webm:"video/webm"})[source.stream_format]||"";
-          try{await openStreamPlayer(source.stream_url,trackedItem.title+" · "+source.server_name,{type:mime,filename:source.stream_url});}
+          const fallbacks=(data||[]).slice(index+1).map(item=>({...item,title:trackedItem.title+" · "+(item.server_name||"سيرفر بديل")}));
+          try{await openStreamPlayer(source.stream_url,trackedItem.title+" · "+(source.server_name||"السيرفر"),{type:mime,filename:source.stream_url,fallbackSources:fallbacks});}
           catch(playError){manualPlaybackStatus.textContent="تعذر بدء التشغيل: "+playError.message;manualPlaybackStatus.classList.add("is-error");}
+        });
+        const primary=document.createElement("button");primary.type="button";primary.className="save-btn";primary.textContent=index===0?"السيرفر الأساسي":"جعله أساسي";primary.disabled=index===0;
+        primary.addEventListener("click",async()=>{
+          primary.disabled=true;manualPlaybackStatus.classList.remove("is-error");manualPlaybackStatus.textContent="جارٍ تحديث أولوية السيرفرات...";
+          const ordered=[source,...(data||[]).filter(item=>item.id!==source.id)];
+          for(let orderIndex=0;orderIndex<ordered.length;orderIndex++){
+            const{error:priorityError}=await supabase.from("playback_sources").update({sort_order:orderIndex===0?0:100+orderIndex}).eq("id",ordered[orderIndex].id).eq("user_id",currentUser.id);
+            if(priorityError){manualPlaybackStatus.textContent="تعذر تحديث الأولوية: "+priorityError.message;manualPlaybackStatus.classList.add("is-error");primary.disabled=false;await loadManualPlaybackSources();return;}
+          }
+          manualPlaybackStatus.textContent="تم تعيين السيرفر الأساسي وترتيب البدائل.";await loadManualPlaybackSources();
         });
         const remove=document.createElement("button");remove.type="button";remove.className="source-remove";remove.textContent="حذف";
         remove.addEventListener("click",async()=>{
@@ -1074,7 +1041,7 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta, providers = [{add
           if(deleteError){manualPlaybackStatus.textContent="تعذر حذف الرابط: "+deleteError.message;manualPlaybackStatus.classList.add("is-error");remove.disabled=false;return;}
           manualPlaybackStatus.classList.remove("is-error");await loadManualPlaybackSources();
         });
-        actions.append(play,remove);row.append(details,actions);manualPlaybackList.append(row);
+        actions.append(play,primary,remove);row.append(details,actions);manualPlaybackList.append(row);
       });
     }
     manualPlaybackForm.addEventListener("submit",async event=>{
@@ -1561,6 +1528,7 @@ document.querySelector("#refresh-catalog")?.addEventListener("click", () => {
   loadAddonDiscovery(activeView);
 });
 document.querySelector("#close-dialog").addEventListener("click", () => document.querySelector("#detail-dialog").close());
+document.querySelector("#player-fallback-button").addEventListener("click",()=>{void playNextFallback();});
 document.querySelector("#close-player").addEventListener("click", () => {
   document.querySelector("#player-dialog").close();
   disposeStreamPlayer();
