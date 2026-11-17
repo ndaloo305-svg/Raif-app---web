@@ -21,7 +21,7 @@ if (/service_role|sb_secret_/i.test(js)) throw new Error("A server-side Supabase
 
 for (const required of [
   "addonCatalogIndex.get(identity)",
-  "addonDiscoveryCache.add(job.key)",
+  "addonDiscoveryCache.add(key)",
   "loadMoreCatalogPages()",
   "CATALOG_CACHE_TTL",
   "catalog-load-more",
