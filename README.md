@@ -56,3 +56,11 @@ The source manager reads enabled add-on HTTPS Manifests through the authenticate
 ## Playback links
 
 RAIF does not need a discovery directory for streaming platforms. Playback links will be supplied by the project owner and organized against the matching movie or series episode. The player will validate supported URL formats and browser compatibility, and report failures clearly. A URL being saved does not by itself guarantee that the host allows browser playback; HLS/DASH may require appropriate CORS support, and DRM or custom-header-only streams are not supported by the current web player.
+
+
+### Owner-managed playback sources
+
+- `public.playback_sources` stores multiple HTTPS playback servers for a movie or an exact episode, keyed by the stable catalog identity and episode ID.
+- Each row stores server name, URL, format hint (auto/HLS/MP4/DASH/WebM), quality, language, and enabled/order metadata. The browser player receives the format hint and reports browser/CORS failures; saving a URL is not a playback guarantee.
+- Row Level Security restricts all read/write operations to the authenticated owner. The browser uses the publishable key only; no service-role key is used.
+- Links are loaded when a title detail is opened and refreshed when the selected episode changes. Users can add, play, and delete links from the detail view.
