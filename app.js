@@ -37,6 +37,7 @@ let addons = [];
 let addonCatalogItems = [];
 let addonCatalogIndex = new Map();
 let catalogDisplayLimit = 72;
+let catalogFilteredCount = 0;
 let catalogMoreLoading = false;
 let addonCatalogLoading = false;
 const addonCatalogPages = new Map();
@@ -284,6 +285,7 @@ function render() {
   });
   else if(activeSort==="title") filtered.sort((a,b)=>(a.title||"").localeCompare(b.title||"","ar"));
   const totalFiltered = filtered.length;
+  catalogFilteredCount = totalFiltered;
   const visibleItems = filtered.slice(0,catalogDisplayLimit);
   const catalogFragment=document.createDocumentFragment();
   const watchedTitles = new Set(watchedRecords.filter(record=>!record.episodeId).map(record=>record.identity));
@@ -1549,7 +1551,7 @@ document.querySelector("#source-form").addEventListener("submit", async event =>
   urlInput.value = "";
   setStatus(sourceStatus, "تم حفظ المصدر في حسابك.");
   await loadSources();
-  addonDiscoveryCache.clear(); addonManifestCache.clear(); addonCatalogItems = []; addonCatalogIndex.clear();
+  addonDiscoveryCache.clear(); addonManifestCache.clear(); addonCatalogPages.clear(); addonCatalogItems = []; addonCatalogIndex.clear();
   restoreCatalogCache();
   if (activeView !== "sources" && activeView !== "library") loadAddonDiscovery(activeView);
 });
@@ -1661,7 +1663,7 @@ document.querySelector("#catalog-sort")?.addEventListener("change", event => {
   render();
 });
 document.querySelector("#catalog-load-more")?.addEventListener("click", async () => {
-  if (catalogDisplayLimit < addonCatalogItems.length) { catalogDisplayLimit += CATALOG_VISIBLE_BATCH; render(); return; }
+  if (catalogDisplayLimit < catalogFilteredCount) { catalogDisplayLimit += CATALOG_VISIBLE_BATCH; render(); return; }
   await loadMoreCatalogPages();
 });
 
