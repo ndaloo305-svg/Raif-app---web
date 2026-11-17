@@ -185,3 +185,24 @@
 .source-health{margin:8px 0 0;color:var(--muted);font-size:11px;line-height:1.7}
 .source-health.is-online{color:#91cba2}
 .source-health.is-error{color:#e58b8b}
+
+/* Owner-managed playback links */
+.manual-playback-section{margin:22px 0;padding:16px;border:1px solid var(--line);border-radius:14px;background:#14161b}
+.manual-playback-section h3{margin:0 0 6px;font-size:16px}
+.manual-playback-hint{margin:0 0 13px;color:var(--muted);font-size:12px;line-height:1.8}
+.manual-playback-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.manual-playback-form input,.manual-playback-form select{min-width:0;width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:9px;background:#101114;color:#fff;padding:11px;font:12px "IBM Plex Sans Arabic",system-ui,sans-serif}
+.manual-playback-form input[type=url]{grid-column:1/-1;direction:ltr;text-align:left}
+.manual-playback-form button{justify-self:start}
+.manual-playback-status{margin:10px 0;color:var(--muted);font-size:12px;line-height:1.7}
+.manual-playback-status.is-error{color:#ff9b9b}
+.manual-playback-list{display:grid;gap:9px;margin-top:10px}
+.manual-playback-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;border:1px solid var(--line);border-radius:10px;background:#1a1c22}
+.manual-playback-details{display:grid;gap:5px;min-width:0}
+.manual-playback-details strong{font-size:13px}
+.manual-playback-details span,.manual-playback-details small{font-size:11px;color:var(--muted);overflow-wrap:anywhere}
+.manual-playback-details small{text-align:left}
+.manual-playback-actions{display:flex;align-items:center;gap:7px;flex-shrink:0}
+.manual-playback-actions .save-btn,.manual-playback-actions .source-remove{padding:8px 11px;font-size:11px}
+.manual-playback-actions button:disabled{opacity:.5}
+@media(max-width:560px){.manual-playback-form{grid-template-columns:1fr}.manual-playback-form input[type=url]{grid-column:auto}.manual-playback-row{align-items:flex-start;flex-direction:column}.manual-playback-actions{width:100%}}
