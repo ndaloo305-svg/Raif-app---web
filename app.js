@@ -45,6 +45,16 @@ const CATALOG_PAGE_SIZE = 100;
 const addonDiscoveryCache = new Set();
 const addonManifestCache = new Map();
 const addonDiscoveryErrors = [];
+const ADDON_MANIFEST_CACHE_TTL = 6 * 60 * 60 * 1000;
+function addonManifestStorageKey(addon){return currentUser&&addon?.id?"raif-addon-manifest-v1:"+currentUser.id+":"+addon.id:null;}
+function removeAddonManifestCache(addon){
+  removeAddonManifestCache(addon);
+  try{const key=addonManifestStorageKey(addon);if(key)localStorage.removeItem(key);}catch{}
+}
+function clearAddonManifestCache(){
+  clearAddonManifestCache();
+  addons.forEach(removeAddonManifestCache);
+}
 let addonDiscoveryRun = 0;
 
 const catalog = document.querySelector("#catalog");
@@ -479,7 +489,7 @@ async function testAddonConnection(addon,button,status){
   status.textContent="جارٍ الاتصال بالمصدر عبر وسيط RAIF...";
   status.className="source-health";
   try{
-    addonManifestCache.delete(addon.id);
+    removeAddonManifestCache(addon);
     const manifest=await fetchAddonResource(addon,"manifest");
     if(!manifest||!Array.isArray(manifest.resources))throw new Error("Manifest غير صالح أو لا يطابق بنية Stremio.");
     const resources=manifest.resources.map(resource=>typeof resource==="string"?resource:resource?.name).filter(Boolean);
@@ -610,21 +620,26 @@ async function invokeAddonProxy(body, label = "المصدر") {
 }
 
 function fetchAddonResource(addon, resource, type, contentId, query = {}) {
-  if (resource === "manifest" && addonManifestCache.has(addon.id)) return addonManifestCache.get(addon.id);
-  const request = invokeAddonProxy({
-    action: resource === "manifest" ? "manifest" : "resource",
-    addon_id: addon.id,
-    resource,
-    type,
-    content_id: contentId,
-    query
-  }, resource === "manifest" ? "Manifest" : resource);
   if (resource === "manifest") {
-    const cached = request.catch(error => { addonManifestCache.delete(addon.id); throw error; });
-    addonManifestCache.set(addon.id, cached);
+    if (addonManifestCache.has(addon.id)) return addonManifestCache.get(addon.id);
+    const storageKey = addonManifestStorageKey(addon);
+    try {
+      const stored = JSON.parse(storageKey ? localStorage.getItem(storageKey) || "null" : "null");
+      if (stored?.manifest && Number.isFinite(stored.expiresAt) && stored.expiresAt > Date.now()) {
+        const cached = Promise.resolve(stored.manifest);
+        addonManifestCache.set(addon.id,cached);
+        return cached;
+      }
+    } catch {}
+    const request = invokeAddonProxy({action:"manifest",addon_id:addon.id,resource}, "Manifest");
+    const cached = request.then(manifest => {
+      try { if(storageKey)localStorage.setItem(storageKey,JSON.stringify({expiresAt:Date.now()+ADDON_MANIFEST_CACHE_TTL,manifest})); } catch {}
+      return manifest;
+    }).catch(error => { removeAddonManifestCache(addon); throw error; });
+    addonManifestCache.set(addon.id,cached);
     return cached;
   }
-  return request;
+  return invokeAddonProxy({action:"resource",addon_id:addon.id,resource,type,content_id:contentId,query},"المصدر");
 }
 
 function fetchAddonManifestByUrl(manifestUrl) {
@@ -662,7 +677,7 @@ async function loadAddonDiscovery(view = activeView) {
         const manifest = await withTimeout(fetchAddonResource(addon,"manifest"),"Manifest " + (addon.name || addon.addon_id));
         manifestResults[index] = {status:"fulfilled",value:{addon,manifest}};
       } catch(error) {
-        addonManifestCache.delete(addon.id);
+        removeAddonManifestCache(addon);
         manifestResults[index] = {status:"rejected",reason:Object.assign(new Error(error.message),{addon})};
       }
     }
@@ -1511,7 +1526,7 @@ async function updateSource(id, changes) {
   }
   setStatus(sourceStatus, "تم تحديث حالة المصدر.");
   await loadSources();
-  addonDiscoveryCache.clear(); addonManifestCache.clear(); addonCatalogPages.clear();
+  addonDiscoveryCache.clear(); clearAddonManifestCache(); addonCatalogPages.clear();
   addonCatalogItems = []; addonCatalogIndex.clear();
   restoreCatalogCache();
   if (activeView !== "sources" && activeView !== "library") loadAddonDiscovery(activeView);
@@ -1525,7 +1540,7 @@ async function deleteSource(id) {
   }
   setStatus(sourceStatus, "تم حذف المصدر من حسابك.");
   await loadSources();
-  addonDiscoveryCache.clear(); addonManifestCache.clear(); addonCatalogPages.clear(); addonCatalogItems = []; addonCatalogIndex.clear();
+  addonDiscoveryCache.clear(); clearAddonManifestCache(); addonCatalogPages.clear(); addonCatalogItems = []; addonCatalogIndex.clear();
   restoreCatalogCache();
   if (activeView !== "sources" && activeView !== "library") loadAddonDiscovery(activeView);
 }
@@ -1569,7 +1584,7 @@ document.querySelector("#source-form").addEventListener("submit", async event =>
   urlInput.value = "";
   setStatus(sourceStatus, "تم حفظ المصدر في حسابك.");
   await loadSources();
-  addonDiscoveryCache.clear(); addonManifestCache.clear(); addonCatalogPages.clear(); addonCatalogItems = []; addonCatalogIndex.clear();
+  addonDiscoveryCache.clear(); clearAddonManifestCache(); addonCatalogPages.clear(); addonCatalogItems = []; addonCatalogIndex.clear();
   restoreCatalogCache();
   if (activeView !== "sources" && activeView !== "library") loadAddonDiscovery(activeView);
 });
@@ -1692,7 +1707,7 @@ search.addEventListener("input", () => {
   searchRenderTimer = setTimeout(() => { searchRenderTimer = null; render(); }, 160);
 });
 document.querySelector("#refresh-catalog")?.addEventListener("click", () => {
-  addonDiscoveryCache.clear(); addonManifestCache.clear(); addonCatalogPages.clear(); addonDiscoveryErrors.length = 0;
+  addonDiscoveryCache.clear(); clearAddonManifestCache(); addonCatalogPages.clear(); addonDiscoveryErrors.length = 0;
   loadAddonDiscovery(activeView);
 });
 document.querySelector("#close-dialog").addEventListener("click", () => document.querySelector("#detail-dialog").close());
@@ -1812,7 +1827,7 @@ supabase.auth.onAuthStateChange((_event, session) => {
     addonCatalogIndex.clear();
     addonCatalogPages.clear();
     addonDiscoveryCache.clear();
-    addonManifestCache.clear();
+    clearAddonManifestCache();
     savedIds = [];
     watchedRecords = [];
     render();
