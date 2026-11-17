@@ -9,8 +9,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=20261117c">
-  <script type="module" src="./app.js?v=20261117c"></script>
+  <link rel="stylesheet" href="./styles.css?v=20261117d">
+  <script type="module" src="./app.js?v=20261117d"></script>
 </head>
 <body>
   <div class="app-shell">
@@ -101,6 +101,7 @@
     <h2 id="player-title">مشغل RAIF</h2>
     <video id="raif-video" controls playsinline preload="metadata"></video>
     <p id="player-status" class="auth-status" role="status">اختر مصدراً لبدء التشغيل.</p>
+    <button id="player-fallback-button" class="save-btn player-fallback-button" type="button" hidden>جرّب السيرفر التالي</button>
     <p class="player-note">يمكن اختيار الترجمة من تفاصيل العنوان قبل بدء المشاهدة.</p>
     <p class="player-note">يدعم المشغل ملفات الفيديو المباشرة وHLS حسب دعم المتصفح والخادم. قد تتطلب بعض الروابط CORS أو ترويسات خاصة.</p>
   </dialog>
