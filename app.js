@@ -261,7 +261,7 @@ function render() {
     return activeSort==="latest" ? by-ay : ay-by;
   });
   else if(activeSort==="title") filtered.sort((a,b)=>(a.title||"").localeCompare(b.title||"","ar"));
-  catalog.replaceChildren();
+  const catalogFragment=document.createDocumentFragment();
   filtered.forEach(item=>{
     const card=document.createElement("article");card.className="media-card";card.tabIndex=0;card.setAttribute("role","button");card.setAttribute("aria-label","تفاصيل "+item.title);
     const poster=document.createElement("div");poster.className="poster";
@@ -277,8 +277,9 @@ function render() {
     const progress=getEpisodeWatchCount(item.identity);
     const meta=document.createElement("div");meta.className="media-meta";meta.textContent=[item.year,item.genre,item.providers.length+" مصدر",progress?progress+" حلقة مشاهدة":""].filter(Boolean).join(" · ");
     card.append(poster,title,meta);card.addEventListener("click",()=>openAddonMeta(item.addon,item.catalogEntry,item.meta,item.providers));
-    card.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();card.click();}});catalog.append(card);
+    card.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();card.click();}});catalogFragment.append(card);
   });
+  catalog.replaceChildren(catalogFragment);
   const count=document.querySelector("#catalog-count");if(count)count.textContent=filtered.length.toLocaleString("ar")+" عنوان · "+filtered.reduce((n,x)=>n+x.providers.length,0).toLocaleString("ar")+" نتائج مصادر";
   const messages={library:currentUser?"قائمتك فارغة حالياً. أضف العناوين من صفحة التفاصيل.":"سجّل الدخول لعرض قائمتك.",watched:currentUser?"لم تسجّل أي عنوان كمشاهد حتى الآن.":"سجّل الدخول لعرض سجل المشاهدة.",progress:currentUser?"لا يوجد تقدم مسجل للحلقات حتى الآن.":"سجّل الدخول لمتابعة تقدم المسلسلات."};
   if(messages[activeView])empty.textContent=messages[activeView];
@@ -584,50 +585,82 @@ async function loadAddonDiscovery(view = activeView) {
   const run = ++addonDiscoveryRun;
   const wanted = view === "movies" ? ["movie"] : view === "series" ? ["series"] : view === "anime" ? ["anime","series"] : ["movie","series","anime"];
   const enabled = addons.filter(addon => addon.enabled);
-  addonCatalogLoading = true; addonDiscoveryErrors.length = 0; render();
-  if (!enabled.length) { addonCatalogLoading = false; render(); return; }
-  const withTimeout = (promise,label,ms=14000) => Promise.race([promise,new Promise((_,reject) => setTimeout(() => reject(new Error("انتهت مهلة الاتصال: " + label)),ms))]);
-  const getManifest = addon => {
-    if (!addonManifestCache.has(addon.id)) {
-      const request = withTimeout(fetchAddonResource(addon,"manifest"),"Manifest");
-      addonManifestCache.set(addon.id,request.catch(error => { addonManifestCache.delete(addon.id); throw error; }));
+  addonCatalogLoading = true;
+  addonDiscoveryErrors.length = 0;
+  render();
+  if (!enabled.length) {
+    addonCatalogLoading = false;
+    render();
+    return;
+  }
+  const withTimeout = (promise,label,ms=12000) => Promise.race([
+    promise,
+    new Promise((_,reject) => setTimeout(() => reject(new Error("انتهت مهلة الاتصال: " + label)),ms))
+  ]);
+  const manifestResults = await Promise.allSettled(enabled.map(async addon => {
+    try {
+      const manifest = await withTimeout(fetchAddonResource(addon,"manifest"),"Manifest " + (addon.name || addon.addon_id));
+      return {addon,manifest};
+    } catch(error) {
+      addonManifestCache.delete(addon.id);
+      throw Object.assign(new Error(error.message),{addon});
     }
-    return addonManifestCache.get(addon.id);
+  }));
+  if (run !== addonDiscoveryRun) return;
+  const jobs = [];
+  manifestResults.forEach(result => {
+    if (result.status === "rejected") {
+      const addon = result.reason?.addon;
+      addonDiscoveryErrors.push({addon:addon?.name || addon?.addon_id || "مصدر",message:result.reason?.message || "تعذر تحميل Manifest"});
+      return;
+    }
+    const {addon,manifest} = result.value;
+    const resources = Array.isArray(manifest?.resources) ? manifest.resources.map(resource => typeof resource === "string" ? resource : resource?.name) : [];
+    if (!resources.includes("catalog")) return;
+    const entries = (Array.isArray(manifest?.catalogs) ? manifest.catalogs : []).filter(entry => entry?.id && wanted.includes(entry.type));
+    entries.forEach(entry => {
+      const key = addon.id + "|" + entry.type + "|" + entry.id;
+      if (addonDiscoveryCache.has(key)) return;
+      addonDiscoveryCache.add(key);
+      jobs.push({addon,entry,key});
+    });
+  });
+  let cursor = 0;
+  let renderQueued = false;
+  const scheduleRender = () => {
+    if (renderQueued) return;
+    renderQueued = true;
+    requestAnimationFrame(() => {
+      renderQueued = false;
+      if (run === addonDiscoveryRun) render();
+    });
   };
-  let cursor=0;
-  const worker=async () => {
-    while (cursor < enabled.length) {
-      const addon=enabled[cursor++];
+  const worker = async () => {
+    while (cursor < jobs.length && run === addonDiscoveryRun) {
+      const job = jobs[cursor++];
       try {
-        const manifest=await getManifest(addon);
-        const resources=Array.isArray(manifest?.resources) ? manifest.resources.map(resource => typeof resource === "string" ? resource : resource?.name) : [];
-        if (!resources.includes("catalog")) continue;
-        const entries=(Array.isArray(manifest?.catalogs) ? manifest.catalogs : []).filter(entry => entry?.id && wanted.includes(entry.type));
-        for (const entry of entries) {
-          const key=addon.id + "|" + entry.type + "|" + entry.id;
-          if (addonDiscoveryCache.has(key)) continue;
-          addonDiscoveryCache.add(key);
-          try {
-            const data=await withTimeout(fetchAddonResource(addon,"catalog",entry.type,entry.id,{skip:0}),"كتالوج " + (entry.name || entry.id));
-            (Array.isArray(data?.metas) ? data.metas : []).forEach(meta => mergeCatalogMeta(addon,entry,meta));
-            saveCatalogCache();
-            render();
-          } catch(error) {
-            addonDiscoveryCache.delete(key);
-            addonDiscoveryErrors.push({addon:addon.name || addon.addon_id,catalog:entry.name || entry.id,message:error.message});
-            console.warn("RAIF catalog load failed:",addon.name,entry.id,error);
-          }
-        }
+        const data = await withTimeout(
+          fetchAddonResource(job.addon,"catalog",job.entry.type,job.entry.id,{skip:0}),
+          "كتالوج " + (job.entry.name || job.entry.id)
+        );
+        if (run !== addonDiscoveryRun) return;
+        (Array.isArray(data?.metas) ? data.metas : []).forEach(meta => mergeCatalogMeta(job.addon,job.entry,meta));
+        scheduleRender();
       } catch(error) {
-        addonDiscoveryErrors.push({addon:addon.name || addon.addon_id,message:error.message});
-        console.warn("RAIF manifest load failed:",addon.name,error);
+        addonDiscoveryCache.delete(job.key);
+        addonDiscoveryErrors.push({addon:job.addon.name || job.addon.addon_id,catalog:job.entry.name || job.entry.id,message:error.message});
+        console.warn("RAIF catalog load failed:",job.addon.name,job.entry.id,error);
       }
     }
   };
-  await Promise.all(Array.from({length:Math.min(5,enabled.length)},() => worker()));
-  if (run === addonDiscoveryRun) { saveCatalogCache(); addonCatalogLoading=false; render(); renderDiscoveryDiagnostics(); }
+  await Promise.all(Array.from({length:Math.min(6,jobs.length)},() => worker()));
+  if (run === addonDiscoveryRun) {
+    saveCatalogCache();
+    addonCatalogLoading = false;
+    render();
+    renderDiscoveryDiagnostics();
+  }
 }
-
 function renderDiscoveryDiagnostics() {
   const panel=document.querySelector("#catalog-diagnostics"); if (!panel) return; panel.replaceChildren();
   const heading=document.createElement("strong"); heading.textContent="حالة الكتالوج والمصادر";
@@ -1480,7 +1513,7 @@ document.querySelector("#source-import-button").addEventListener("click", async 
             typeof resource === "string" ? resource : resource?.name
           ).filter(Boolean);
           const supported = resources.some(resource =>
-            ["catalog", "subtitles"].includes(resource)
+            ["catalog", "stream", "subtitles"].includes(resource)
           );
           if (!supported) { skipped++; continue; }
           accepted.push({
