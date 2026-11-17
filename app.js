@@ -1799,10 +1799,23 @@ document.querySelector("#sign-out").addEventListener("click", async () => {
 });
 
 supabase.auth.onAuthStateChange((_event, session) => {
-  currentUser = session?.user || null;
+  const nextUser = session?.user || null;
+  if (currentUser?.id === nextUser?.id) return;
+  currentUser = nextUser;
   updateAuthView();
-  loadWatchHistory();
-  Promise.resolve().then(async () => { await loadFavorites(); if (activeView === "sources") await loadSources(); });
+  if (!nextUser) {
+    addonDiscoveryRun++;
+    addonCatalogLoading = false;
+    addons = [];
+    addonCatalogItems = [];
+    addonCatalogIndex.clear();
+    addonCatalogPages.clear();
+    addonDiscoveryCache.clear();
+    addonManifestCache.clear();
+    savedIds = [];
+    watchedRecords = [];
+    render();
+  }
 });
 
 window.addEventListener("online", () => { if (currentUser) void loadWatchHistory(); });
