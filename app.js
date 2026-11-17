@@ -962,7 +962,7 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta, providers = [{add
     let selectedVideoId = null;
     let getSelectedEpisode = () => null;
     let manualSourceRequest = 0;
-    if (catalogEntry.type === "series" && Array.isArray(meta.videos) && meta.videos.length) {
+    if (["series","anime"].includes(catalogEntry.type) && Array.isArray(meta.videos) && meta.videos.length) {
       const episodes=meta.videos.filter(video=>video&&video.id);
       selectedVideoId = episodes[0]?.id || null;
       const episodeLabel = document.createElement("label");
