@@ -1019,13 +1019,13 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta, providers = [{add
     const manualPlaybackForm=document.createElement("form");
     manualPlaybackForm.className="manual-playback-form";
     const manualServerInput=document.createElement("input");
-    manualServerInput.type="text";manualServerInput.maxLength=100;manualServerInput.placeholder="اسم السيرفر (مثال: السيرفر الأول)";manualServerInput.required=true;
+    manualServerInput.type="text";manualServerInput.maxLength=100;manualServerInput.placeholder="اسم السيرفر (مثال: السيرفر الأول)";manualServerInput.setAttribute("aria-label","اسم السيرفر");manualServerInput.required=true;
     const manualUrlInput=document.createElement("input");
-    manualUrlInput.type="url";manualUrlInput.inputMode="url";manualUrlInput.placeholder="https://example.com/video.m3u8";manualUrlInput.required=true;manualUrlInput.autocomplete="url";
-    const manualFormatSelect=document.createElement("select");
+    manualUrlInput.type="url";manualUrlInput.inputMode="url";manualUrlInput.placeholder="https://example.com/video.m3u8";manualUrlInput.setAttribute("aria-label","رابط البث المباشر");manualUrlInput.required=true;manualUrlInput.autocomplete="url";
+    const manualFormatSelect=document.createElement("select");manualFormatSelect.setAttribute("aria-label","صيغة البث");
     [["auto","تلقائي"],["hls","HLS / M3U8"],["mp4","MP4"],["dash","DASH / MPD"],["webm","WebM"]].forEach(([value,label])=>{const option=document.createElement("option");option.value=value;option.textContent=label;manualFormatSelect.append(option);});
-    const manualQualityInput=document.createElement("input");manualQualityInput.type="text";manualQualityInput.maxLength=40;manualQualityInput.placeholder="الجودة (مثال: 1080p)";
-    const manualLanguageInput=document.createElement("input");manualLanguageInput.type="text";manualLanguageInput.maxLength=40;manualLanguageInput.placeholder="اللغة (اختياري)";
+    const manualQualityInput=document.createElement("input");manualQualityInput.type="text";manualQualityInput.maxLength=40;manualQualityInput.placeholder="الجودة (مثال: 1080p)";manualQualityInput.setAttribute("aria-label","جودة البث");
+    const manualLanguageInput=document.createElement("input");manualLanguageInput.type="text";manualLanguageInput.maxLength=40;manualLanguageInput.placeholder="اللغة (اختياري)";manualLanguageInput.setAttribute("aria-label","لغة البث");
     const manualSaveButton=document.createElement("button");manualSaveButton.type="submit";manualSaveButton.className="primary-btn";manualSaveButton.textContent="＋ حفظ رابط السيرفر";
     manualPlaybackForm.append(manualServerInput,manualUrlInput,manualFormatSelect,manualQualityInput,manualLanguageInput,manualSaveButton);
     const manualPlaybackStatus=document.createElement("p");manualPlaybackStatus.className="manual-playback-status";manualPlaybackStatus.setAttribute("role","status");
@@ -1088,8 +1088,8 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta, providers = [{add
         user_id:currentUser.id,content_identity:trackedItem.identity,content_type:trackedItem.type,
         content_title:trackedItem.title,content_year:String(trackedItem.year||""),
         episode_key:episode?.id?String(episode.id):"",episode_title:episode?.title||"",
-        season_number:Number.isInteger(Number(episode?.season))?Number(episode.season):null,
-        episode_number:Number.isInteger(Number(episode?.episode))?Number(episode.episode):null,
+        season_number:episode?.season!=null&&Number.isInteger(Number(episode.season))?Number(episode.season):null,
+        episode_number:episode?.episode!=null&&Number.isInteger(Number(episode.episode))?Number(episode.episode):null,
         server_name:serverName,stream_url:streamUrl.href,stream_format:manualFormatSelect.value,
         quality_label:manualQualityInput.value.trim(),language:manualLanguageInput.value.trim(),enabled:true,sort_order:100
       };
