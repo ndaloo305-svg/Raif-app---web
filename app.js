@@ -1132,19 +1132,39 @@ async function openAddonMeta(addon, catalogEntry, catalogMeta, providers = [{add
         // Catalog/metadata add-ons are often separate from stream-provider add-ons.
         // Query every enabled add-on that actually declares the stream resource.
         const providers = addons.filter(candidate => candidate.enabled);
-        const settled = await Promise.allSettled(providers.map(async candidate => {
-          const manifest = await fetchAddonResource(candidate, "manifest");
-          const resources = Array.isArray(manifest?.resources) ? manifest.resources.map(resource =>
-            typeof resource === "string" ? resource : resource?.name
-          ) : [];
-          if (!resources.includes("stream")) return [];
-          const streamData = await fetchAddonResource(candidate, "stream", catalogEntry.type, meta.id,
-            selectedVideoId ? {videoId:selectedVideoId} : {});
-          return (Array.isArray(streamData?.streams) ? streamData.streams : [])
-            .map(stream => ({...stream, _raifProviderName:candidate.name || candidate.addon_id}));
-        }));
-        const failedProviders = settled.filter(result => result.status === "rejected").length;
-        const rawStreams = settled.flatMap(result => result.status === "fulfilled" ? result.value : []);
+        const settled = new Array(providers.length);
+        let providerCursor = 0;
+        const withProviderTimeout = (promise,label,ms=12000) => Promise.race([
+          promise,
+          new Promise((_,reject) => setTimeout(() => reject(new Error("انتهت مهلة " + label)),ms))
+        ]);
+        const providerWorker = async () => {
+          while (providerCursor < providers.length) {
+            const index = providerCursor++;
+            const candidate = providers[index];
+            try {
+              const manifest = await withProviderTimeout(fetchAddonResource(candidate,"manifest"),"Manifest");
+              const resources = Array.isArray(manifest?.resources) ? manifest.resources.map(resource =>
+                typeof resource === "string" ? resource : resource?.name
+              ) : [];
+              if (!resources.includes("stream")) {
+                settled[index] = {status:"fulfilled",value:[]};
+                continue;
+              }
+              const streamData = await withProviderTimeout(
+                fetchAddonResource(candidate,"stream",catalogEntry.type,meta.id,selectedVideoId ? {videoId:selectedVideoId} : {}),
+                "مصدر التشغيل"
+              );
+              settled[index] = {status:"fulfilled",value:(Array.isArray(streamData?.streams) ? streamData.streams : [])
+                .map(stream => ({...stream,_raifProviderName:candidate.name || candidate.addon_id}))};
+            } catch(error) {
+              settled[index] = {status:"rejected",reason:error};
+            }
+          }
+        };
+        await Promise.all(Array.from({length:Math.min(4,providers.length)},() => providerWorker()));
+        const failedProviders = settled.filter(result => result?.status === "rejected").length;
+        const rawStreams = settled.flatMap(result => result?.status === "fulfilled" ? result.value : []);
         const streams = rawStreams.filter(stream => {
           const streamLabel = [stream?.name, stream?.title, stream?.description].filter(Boolean).join(" ");
           if (/\b(?:torrent|debrid|real[- ]?debrid|peer[- ]?to[- ]?peer|p2p)\b/i.test(streamLabel)) return false;
